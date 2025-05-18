@@ -1,0 +1,324 @@
+from typing import Dict, List, Optional, Tuple
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from .model_utils import QwenModel, compute_loss
+
+class SFTTrainer:
+    def __init__(
+        self,
+        model: QwenModel,
+        learning_rate: float = 1e-5,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
+        weight_decay: float = 0.01
+    ):
+        """
+        Initialize SFT trainer.
+        
+        Args:
+            model: Qwen model instance
+            learning_rate: Learning rate for optimizer
+            beta1: Beta1 for Adam optimizer
+            beta2: Beta2 for Adam optimizer
+            weight_decay: Weight decay for optimizer
+        """
+        self.model = model
+        self.optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=learning_rate,
+            betas=(beta1, beta2),
+            weight_decay=weight_decay
+        )
+        
+    def train_step(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        labels: torch.Tensor
+    ) -> Dict[str, float]:
+        """
+        Perform a single training step.
+        
+        Args:
+            input_ids: Input token IDs
+            attention_mask: Attention mask
+            labels: Labels for computing loss
+            
+        Returns:
+            Dictionary containing loss value
+        """
+        self.model.train()
+        self.optimizer.zero_grad()
+        
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels
+        )
+        
+        loss = compute_loss(outputs, labels, attention_mask)
+        loss.backward()
+        self.optimizer.step()
+        
+        return {"loss": loss.item()}
+
+class DPOTrainer:
+    def __init__(
+        self,
+        model: QwenModel,
+        ref_model: QwenModel,
+        beta: float = 0.1,
+        learning_rate: float = 1e-5,
+        max_grad_norm: float = 1.0
+    ):
+        """
+        Initialize DPO trainer.
+        
+        Args:
+            model: Policy model to train
+            ref_model: Reference model (typically SFT model)
+            beta: Temperature parameter for DPO
+            learning_rate: Learning rate for optimizer
+            max_grad_norm: Maximum gradient norm for clipping
+        """
+        self.model = model
+        self.ref_model = ref_model
+        self.beta = beta
+        self.max_grad_norm = max_grad_norm
+        self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+        self.device = next(model.parameters()).device
+        
+    def train_step(
+        self,
+        prompt_ids: torch.Tensor,
+        chosen_ids: torch.Tensor,
+        rejected_ids: torch.Tensor,
+        prompt_mask: torch.Tensor,
+        chosen_mask: torch.Tensor,
+        rejected_mask: torch.Tensor
+    ) -> Dict[str, float]:
+        """
+        Perform a single DPO training step.
+        
+        Args:
+            prompt_ids: Input prompt token IDs
+            chosen_ids: Chosen response token IDs
+            rejected_ids: Rejected response token IDs
+            prompt_mask: Prompt attention mask
+            chosen_mask: Chosen response attention mask
+            rejected_mask: Rejected response attention mask
+            
+        Returns:
+            Dictionary containing loss value
+        """
+        self.model.train()
+        self.ref_model.eval()
+        self.optimizer.zero_grad()
+        
+        # Move inputs to device
+        chosen_ids = chosen_ids.to(self.device)
+        rejected_ids = rejected_ids.to(self.device)
+        chosen_mask = chosen_mask.to(self.device)
+        rejected_mask = rejected_mask.to(self.device)
+        
+        # Get policy logits
+        chosen_outputs = self.model(
+            input_ids=chosen_ids,
+            attention_mask=chosen_mask,
+            labels=chosen_ids
+        )
+        rejected_outputs = self.model(
+            input_ids=rejected_ids,
+            attention_mask=rejected_mask,
+            labels=rejected_ids
+        )
+        
+        # Get reference logits
+        with torch.no_grad():
+            chosen_ref_outputs = self.ref_model(
+                input_ids=chosen_ids,
+                attention_mask=chosen_mask,
+                labels=chosen_ids
+            )
+            rejected_ref_outputs = self.ref_model(
+                input_ids=rejected_ids,
+                attention_mask=rejected_mask,
+                labels=rejected_ids
+            )
+        
+        # Compute policy and reference logits
+        chosen_logits = chosen_outputs.logits
+        rejected_logits = rejected_outputs.logits
+        chosen_ref_logits = chosen_ref_outputs.logits
+        rejected_ref_logits = rejected_ref_outputs.logits
+        
+        # Shift logits and labels for next-token prediction
+        chosen_logits = chosen_logits[..., :-1, :].contiguous()
+        rejected_logits = rejected_logits[..., :-1, :].contiguous()
+        chosen_ref_logits = chosen_ref_logits[..., :-1, :].contiguous()
+        rejected_ref_logits = rejected_ref_logits[..., :-1, :].contiguous()
+        
+        chosen_labels = chosen_ids[..., 1:].contiguous()
+        rejected_labels = rejected_ids[..., 1:].contiguous()
+        
+        # Compute log probabilities
+        chosen_log_probs = F.log_softmax(chosen_logits, dim=-1)
+        rejected_log_probs = F.log_softmax(rejected_logits, dim=-1)
+        chosen_ref_log_probs = F.log_softmax(chosen_ref_logits, dim=-1)
+        rejected_ref_log_probs = F.log_softmax(rejected_ref_logits, dim=-1)
+        
+        # Gather log probabilities for the target tokens
+        chosen_log_probs = chosen_log_probs.gather(-1, chosen_labels.unsqueeze(-1)).squeeze(-1)
+        rejected_log_probs = rejected_log_probs.gather(-1, rejected_labels.unsqueeze(-1)).squeeze(-1)
+        chosen_ref_log_probs = chosen_ref_log_probs.gather(-1, chosen_labels.unsqueeze(-1)).squeeze(-1)
+        rejected_ref_log_probs = rejected_ref_log_probs.gather(-1, rejected_labels.unsqueeze(-1)).squeeze(-1)
+        
+        # Apply masks
+        chosen_mask = chosen_mask[..., 1:].contiguous()
+        rejected_mask = rejected_mask[..., 1:].contiguous()
+        
+        # Compute mean log probabilities over sequence length
+        chosen_log_probs = (chosen_log_probs * chosen_mask).sum(dim=-1) / chosen_mask.sum(dim=-1)
+        rejected_log_probs = (rejected_log_probs * rejected_mask).sum(dim=-1) / rejected_mask.sum(dim=-1)
+        chosen_ref_log_probs = (chosen_ref_log_probs * chosen_mask).sum(dim=-1) / chosen_mask.sum(dim=-1)
+        rejected_ref_log_probs = (rejected_ref_log_probs * rejected_mask).sum(dim=-1) / rejected_mask.sum(dim=-1)
+        
+        # Compute log probability ratios
+        chosen_ratio = chosen_log_probs - chosen_ref_log_probs
+        rejected_ratio = rejected_log_probs - rejected_ref_log_probs
+        
+        # Compute DPO loss: -E[log σ(β * (log πθ(yw|x)/πref(yw|x) - log πθ(yl|x)/πref(yl|x)))]
+        loss = -F.logsigmoid(self.beta * (chosen_ratio - rejected_ratio)).mean()
+        
+        loss.backward()
+        
+        # Clip gradients
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+        
+        self.optimizer.step()
+        
+        return {
+            "loss": loss.item(),
+            "chosen_ratio": chosen_ratio.mean().item(),
+            "rejected_ratio": rejected_ratio.mean().item()
+        }
+
+class RLOOTrainer:
+    def __init__(
+        self,
+        model: QwenModel,
+        reward_model: nn.Module,
+        learning_rate: float = 1e-5,
+        num_samples: int = 4,
+        max_grad_norm: float = 1.0
+    ):
+        """
+        Initialize RLOO trainer.
+        
+        Args:
+            model: Policy model to train
+            reward_model: Reward model for computing rewards
+            learning_rate: Learning rate for optimizer
+            num_samples: Number of samples for RLOO (k in the formula)
+            max_grad_norm: Maximum gradient norm for clipping
+        """
+        self.model = model
+        self.reward_model = reward_model
+        self.num_samples = num_samples
+        self.max_grad_norm = max_grad_norm
+        self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+        self.device = next(model.parameters()).device
+        
+    def train_step(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor
+    ) -> Dict[str, float]:
+        """
+        Perform a single RLOO training step.
+        
+        Args:
+            input_ids: Input token IDs
+            attention_mask: Attention mask
+            
+        Returns:
+            Dictionary containing loss value
+        """
+        self.model.train()
+        self.reward_model.eval()
+        self.optimizer.zero_grad()
+        
+        # Move inputs to device
+        input_ids = input_ids.to(self.device)
+        attention_mask = attention_mask.to(self.device)
+        
+        batch_size = input_ids.size(0)
+        total_loss = 0
+        total_rewards = []
+        
+        # Process each example in the batch
+        for i in range(batch_size):
+            # Generate k samples for the current input
+            samples = []
+            sample_rewards = []
+            
+            # Generate k samples
+            for _ in range(self.num_samples):
+                with torch.no_grad():
+                    sample_ids = self.model.generate(
+                        input_ids=input_ids[i:i+1],
+                        attention_mask=attention_mask[i:i+1],
+                        do_sample=True,
+                        temperature=0.7,
+                        top_p=0.9
+                    )
+                    sample_reward = self.reward_model(sample_ids)
+                    samples.append(sample_ids)
+                    sample_rewards.append(sample_reward)
+            
+            # Compute RLOO objective for each sample
+            for j in range(self.num_samples):
+                # Compute baseline: average reward of other samples
+                other_rewards = [sample_rewards[k] for k in range(self.num_samples) if k != j]
+                baseline = sum(other_rewards) / (self.num_samples - 1)
+                
+                # Compute advantage: R(y_i,x) - 1/(k-1) * sum_j!=i R(y_j,x)
+                advantage = sample_rewards[j] - baseline
+                
+                # Get policy logits for the sample
+                outputs = self.model(
+                    input_ids=samples[j],
+                    attention_mask=torch.ones_like(samples[j])
+                )
+                
+                # Compute log probabilities
+                logits = outputs.logits[..., :-1, :].contiguous()
+                labels = samples[j][..., 1:].contiguous()
+                
+                # Compute log probabilities for the target tokens
+                log_probs = F.log_softmax(logits, dim=-1)
+                target_log_probs = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+                
+                # Compute mean log probability
+                mean_log_prob = target_log_probs.mean()
+                
+                # Update total loss: advantage * ∇log π(y_i|x)
+                total_loss += advantage * mean_log_prob
+                total_rewards.append(sample_rewards[j].item())
+        
+        # Average loss over batch and samples
+        total_loss = -total_loss / (batch_size * self.num_samples)  # Negative because we want to maximize
+        avg_reward = sum(total_rewards) / len(total_rewards)
+        
+        total_loss.backward()
+        
+        # Clip gradients
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+        
+        self.optimizer.step()
+        
+        return {
+            "loss": total_loss.item(),
+            "avg_reward": avg_reward
+        }
