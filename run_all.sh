@@ -9,7 +9,7 @@ conda activate rl_llm
 wandb login
 
 # SFT
-python train.py --method sft --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-5 --num_epochs 2 --max_length 256 --output_dir "outputs/sft" --use_wandb
+python train.py --method sft --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-6 --num_epochs 2 --max_length 256 --output_dir "outputs/sft" --use_wandb
 
 # Verify SFT model exists
 if [ ! -d "outputs/sft/final" ]; then
@@ -18,10 +18,10 @@ if [ ! -d "outputs/sft/final" ]; then
 fi
 
 # DPO (using fine-tuned SFT model)
-python train.py --method dpo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 2 --learning_rate 1e-5 --num_epochs 2 --max_length 256 --output_dir "outputs/dpo" --sft_model_path "outputs/sft/final" --use_wandb
+python train.py --method dpo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 2 --learning_rate 1e-6 --num_epochs 2 --max_length 256 --output_dir "outputs/dpo" --sft_model_path "outputs/sft/final" --use_wandb
 
 # RLOO
-python train.py --method rloo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-5 --num_epochs 2 --max_length 256 --output_dir "outputs/rloo" --use_wandb
+python train.py --method rloo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-6 --num_epochs 2 --max_length 256 --output_dir "outputs/rloo" --use_wandb
 
 # Evaluate SFT
 python evaluate.py --model_path "outputs/sft/final" --num_prompts 100 --output_dir "outputs/sft/eval" --use_wandb
