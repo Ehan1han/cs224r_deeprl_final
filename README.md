@@ -71,8 +71,8 @@ python evaluate.py \
 ## Datasets
 
 The pipeline supports two datasets:
-1. SmolTalk (`HuggingFaceTB/smol-smoltalk`): A dataset of conversations for SFT and RLOO training
-2. UltraFeedback (`HuggingFaceH4/ultrafeedback_binarized`): A dataset of preference pairs for DPO training
+1. SmolTalk (`HuggingFaceTB/smol-smoltalk`): A dataset of conversations for SFT 
+2. UltraFeedback (`HuggingFaceH4/ultrafeedback_binarized`): A dataset of preference pairs for DPO training and RLOO training
 
 ## Training Methods
 
@@ -88,7 +88,7 @@ The pipeline supports two datasets:
 
 3. **RLOO (Reinforcement Learning with Offline Optimization)**
    - Uses offline reinforcement learning to optimize responses
-   - Requires a reward model and pre-trained SFT model
+   - Requires a reward model
    - Generates multiple samples for each input
 
 ## Evaluation

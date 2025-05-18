@@ -5,12 +5,11 @@ set -e
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate rl_llm
 
-# Login to wandb
-export WANDB_API_KEY="e654d6407fe0da95379d8938659cdb1ddf7fb857"
+# Login to wandb - no need to export API key since we already logged in
 wandb login
 
 # SFT
-python train.py --method sft --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4  --learning_rate 1e-5 --num_epochs 3 --max_length 256 --output_dir "outputs/sft"
+python train.py --method sft --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-5 --num_epochs 2 --max_length 256 --output_dir "outputs/sft" --use_wandb
 
 # Verify SFT model exists
 if [ ! -d "outputs/sft/final" ]; then
@@ -19,18 +18,18 @@ if [ ! -d "outputs/sft/final" ]; then
 fi
 
 # DPO (using fine-tuned SFT model)
-python train.py --method dpo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 2 --learning_rate 1e-5 --num_epochs 3 --max_length 256 --output_dir "outputs/dpo" --sft_model_path "outputs/sft/final"
+python train.py --method dpo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 2 --learning_rate 1e-5 --num_epochs 2 --max_length 256 --output_dir "outputs/dpo" --sft_model_path "outputs/sft/final" --use_wandb
 
 # RLOO
-python train.py --method rloo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-5 --num_epochs 3 --max_length 256 --output_dir "outputs/rloo"
+python train.py --method rloo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-5 --num_epochs 2 --max_length 256 --output_dir "outputs/rloo" --use_wandb
 
 # Evaluate SFT
-python train.py --method eval --model_path outputs/sft/final --num_prompts 100 --output_dir outputs/sft/eval
+python evaluate.py --model_path "outputs/sft/final" --num_prompts 100 --output_dir "outputs/sft/eval" --use_wandb
 
 # Evaluate DPO
-python train.py --method eval --model_path outputs/dpo/final --num_prompts 100 --output_dir outputs/dpo/eval
+python evaluate.py --model_path "outputs/dpo/final" --num_prompts 100 --output_dir "outputs/dpo/eval" --use_wandb
 
 # Evaluate RLOO
-python train.py --method eval --model_path outputs/rloo/final --num_prompts 100 --output_dir outputs/rloo/eval
+python evaluate.py --model_path "outputs/rloo/final" --num_prompts 100 --output_dir "outputs/rloo/eval" --use_wandb
 
 echo "All done!" 

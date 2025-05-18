@@ -31,9 +31,14 @@ def train_sft(
     """Train model using SFT."""
     # Initialize wandb if enabled
     if use_wandb:
-        wandb.init(
-            project="rl_llm_final",
-            entity="yhanzhao",
+        run = wandb.init(
+            # Set the entity (usually your username or team name)
+            entity="zhao111han-stanford-university",
+            # Set the project
+            project="cs224r_deeprl_final",
+            # Name this run for better tracking
+            name=f"sft_{model_name.split('/')[-1]}_{dataset_name}",
+            # Track hyperparameters and run metadata
             config={
                 "model_name": model_name,
                 "dataset_name": dataset_name,
@@ -75,12 +80,17 @@ def train_sft(
             )
             total_loss += metrics["loss"]
             if use_wandb:
-                wandb.log(metrics)
+                # Log metrics with epoch info
+                wandb.log({"loss": metrics["loss"], "epoch": epoch + 1})
             else:
                 print(f"Batch loss: {metrics['loss']:.4f}")
         
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch {epoch + 1}/{num_epochs}, Average Loss: {avg_loss:.4f}")
+        
+        # Log epoch metrics
+        if use_wandb:
+            wandb.log({"avg_loss": avg_loss, "epoch": epoch + 1})
         
         # Save checkpoint
         os.makedirs(output_dir, exist_ok=True)
@@ -89,7 +99,8 @@ def train_sft(
     # Save final model
     model.save_pretrained(os.path.join(output_dir, "final"))
     if use_wandb:
-        wandb.finish()
+        # Finish the run
+        run.finish()
 
 def train_dpo(
     model_name: str,
@@ -105,9 +116,14 @@ def train_dpo(
     """Train model using DPO."""
     # Initialize wandb if enabled
     if use_wandb:
-        wandb.init(
-            project="rl_llm_final",
-            entity="yhanzhao",
+        run = wandb.init(
+            # Set the entity (usually your username or team name)
+            entity="zhao111han-stanford-university",
+            # Set the project   
+            project="cs224r_deeprl_final",
+            # Name this run for better tracking
+            name=f"dpo_{model_name.split('/')[-1]}_{dataset_name}",
+            # Track hyperparameters and run metadata
             config={
                 "model_name": model_name,
                 "dataset_name": dataset_name,
@@ -115,6 +131,7 @@ def train_dpo(
                 "learning_rate": learning_rate,
                 "num_epochs": num_epochs,
                 "max_length": max_length,
+                "sft_model_path": sft_model_path,
                 "method": "dpo"
             }
         )
@@ -158,12 +175,17 @@ def train_dpo(
             )
             total_loss += metrics["loss"]
             if use_wandb:
-                wandb.log(metrics)
+                # Log metrics with epoch info
+                wandb.log({"loss": metrics["loss"], "epoch": epoch + 1})
             else:
                 print(f"Batch loss: {metrics['loss']:.4f}")
         
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch {epoch + 1}/{num_epochs}, Average Loss: {avg_loss:.4f}")
+        
+        # Log epoch metrics
+        if use_wandb:
+            wandb.log({"avg_loss": avg_loss, "epoch": epoch + 1})
         
         # Save checkpoint
         os.makedirs(output_dir, exist_ok=True)
@@ -172,7 +194,8 @@ def train_dpo(
     # Save final model
     model.save_pretrained(os.path.join(output_dir, "final"))
     if use_wandb:
-        wandb.finish()
+        # Finish the run
+        run.finish()
 
 def train_rloo(
     model_name: str,
@@ -187,9 +210,14 @@ def train_rloo(
     """Train model using RLOO."""
     # Initialize wandb if enabled
     if use_wandb:
-        wandb.init(
-            project="rl_llm_final",
-            entity="yhanzhao",
+        run = wandb.init(
+            # Set the entity (usually your username or team name)
+            entity="zhao111han-stanford-university",
+            # Set the project
+            project="cs224r_deeprl_final",
+            # Name this run for better tracking
+            name=f"rloo_{model_name.split('/')[-1]}_{dataset_name}",
+            # Track hyperparameters and run metadata
             config={
                 "model_name": model_name,
                 "dataset_name": dataset_name,
@@ -246,12 +274,17 @@ def train_rloo(
             )
             total_loss += metrics["loss"]
             if use_wandb:
-                wandb.log({"rloo_loss": metrics["loss"]})
+                # Log metrics with epoch information
+                wandb.log({"rloo_loss": metrics["loss"], "epoch": epoch + 1})
             else:
                 print(f"Batch loss: {metrics['loss']:.4f}")
         
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch {epoch + 1} average loss: {avg_loss:.4f}")
+        
+        # Log epoch metrics
+        if use_wandb:
+            wandb.log({"avg_rloo_loss": avg_loss, "epoch": epoch + 1})
         
         # Save checkpoint
         os.makedirs(output_dir, exist_ok=True)
@@ -260,7 +293,8 @@ def train_rloo(
     # Save final model
     model.save_pretrained(os.path.join(output_dir, "final"))
     if use_wandb:
-        wandb.finish()
+        # Finish the run
+        run.finish()
 
 def evaluate_model(
     model_path: str,
@@ -271,9 +305,14 @@ def evaluate_model(
     """Evaluate model performance."""
     # Initialize wandb if enabled
     if use_wandb:
-        wandb.init(
-            project="rl_llm_final",
-            entity="yhanzhao",
+        run = wandb.init(
+            # Set the entity (usually your username or team name)
+            entity="zhao111han-stanford-university",
+            # Set the project
+            project="cs224r_deeprl_final",
+            # Name this run for better tracking
+            name=f"eval_{model_path.split('/')[-2]}",
+            # Track hyperparameters and run metadata
             config={
                 "model_path": model_path,
                 "num_prompts": num_prompts,
@@ -298,12 +337,14 @@ def evaluate_model(
         json.dump(metrics, f, indent=2)
     
     if use_wandb:
+        # Log all metrics at once
         wandb.log(metrics)
-        wandb.finish()
+        # Finish the run
+        run.finish()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--method", type=str, required=True, choices=["sft", "dpo", "rloo"])
+    parser.add_argument("--method", type=str, required=True, choices=["sft", "dpo", "rloo", "eval"])
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-0.5B")
     parser.add_argument("--dataset_name", type=str)  # No default, will be set based on method
     parser.add_argument("--batch_size", type=int, default=8)
@@ -311,6 +352,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=3)
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--sft_model_path", type=str)
+    parser.add_argument("--model_path", type=str, help="Path to model for evaluation")
+    parser.add_argument("--num_prompts", type=int, default=100, help="Number of prompts for evaluation")
     parser.add_argument("--output_dir", type=str)
     parser.add_argument("--subset_size", type=int, default=100)
     parser.add_argument("--use_wandb", action="store_true", help="Enable W&B logging")
@@ -357,5 +400,14 @@ if __name__ == "__main__":
             num_epochs=args.num_epochs,
             max_length=args.max_length,
             output_dir=args.output_dir or "outputs/rloo",
+            use_wandb=args.use_wandb
+        )
+    elif args.method == "eval":
+        if not args.model_path:
+            raise ValueError("model_path is required for evaluation")
+        evaluate_model(
+            model_path=args.model_path,
+            num_prompts=args.num_prompts,
+            output_dir=args.output_dir or f"outputs/eval/{args.model_path.split('/')[-2]}",
             use_wandb=args.use_wandb
         ) 
