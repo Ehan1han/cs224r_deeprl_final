@@ -7,7 +7,7 @@ from rl_llm.evaluation import run_evaluation
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, required=True)
-    parser.add_argument("--nemotron_api_key", type=str)
+    parser.add_argument("--nemotron_api_key", type=str, default="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")
     parser.add_argument("--num_prompts", type=int, default=100)
     parser.add_argument("--output_dir", type=str, help="Directory to save evaluation results")
     parser.add_argument("--use_wandb", action="store_true", help="Enable W&B logging")
@@ -36,6 +36,10 @@ def main():
         )
     
     # Run evaluation
+    print(f"\nEvaluating model: {args.model_path}")
+    print(f"Number of prompts: {args.num_prompts}")
+    print(f"Using Nemotron API key: {args.nemotron_api_key[:10]}...")
+    
     metrics = run_evaluation(
         model_path=args.model_path,
         nemotron_api_key=args.nemotron_api_key,
@@ -43,13 +47,13 @@ def main():
         output_dir=args.output_dir
     )
     
-    # Print metrics
-    print("\nEvaluation Metrics:")
-    for metric_name, value in metrics.items():
-        if isinstance(value, float):
-            print(f"{metric_name}: {value:.4f}")
-        else:
-            print(f"{metric_name}: {value}")
+    # Print only vital metrics
+    print("\n----- EVALUATION RESULTS -----")
+    print(f"Win rate:            {metrics['win_rate']:.4f}")
+    print(f"Avg model reward:    {metrics['avg_model_reward']:.4f}")
+    print(f"Avg reference reward: {metrics['avg_ref_reward']:.4f}")
+    print(f"Reward improvement:   {metrics['reward_improvement']:.4f}")
+    print("------------------------------")
     
     # Log to wandb if enabled
     if args.use_wandb:

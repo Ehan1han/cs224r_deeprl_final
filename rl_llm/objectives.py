@@ -232,15 +232,23 @@ class RLOOTrainer:
         
     def train_step(
         self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor
+        prompt_ids: torch.Tensor,
+        chosen_ids: torch.Tensor,
+        rejected_ids: torch.Tensor,
+        prompt_mask: torch.Tensor,
+        chosen_mask: torch.Tensor,
+        rejected_mask: torch.Tensor
     ) -> Dict[str, float]:
         """
         Perform a single RLOO training step.
         
         Args:
-            input_ids: Input token IDs
-            attention_mask: Attention mask
+            prompt_ids: Input prompt token IDs
+            chosen_ids: Chosen response token IDs
+            rejected_ids: Rejected response token IDs
+            prompt_mask: Prompt attention mask
+            chosen_mask: Chosen response attention mask
+            rejected_mask: Rejected response attention mask
             
         Returns:
             Dictionary containing loss value
@@ -250,10 +258,14 @@ class RLOOTrainer:
         self.optimizer.zero_grad()
         
         # Move inputs to device
-        input_ids = input_ids.to(self.device)
-        attention_mask = attention_mask.to(self.device)
+        prompt_ids = prompt_ids.to(self.device)
+        chosen_ids = chosen_ids.to(self.device)
+        rejected_ids = rejected_ids.to(self.device)
+        prompt_mask = prompt_mask.to(self.device)
+        chosen_mask = chosen_mask.to(self.device)
+        rejected_mask = rejected_mask.to(self.device)
         
-        batch_size = input_ids.size(0)
+        batch_size = prompt_ids.size(0)
         total_loss = 0
         total_rewards = []
         
@@ -267,8 +279,8 @@ class RLOOTrainer:
             for _ in range(self.num_samples):
                 with torch.no_grad():
                     sample_ids = self.model.generate(
-                        input_ids=input_ids[i:i+1],
-                        attention_mask=attention_mask[i:i+1],
+                        input_ids=prompt_ids[i:i+1],
+                        attention_mask=prompt_mask[i:i+1],
                         do_sample=True,
                         temperature=0.7,
                         top_p=0.9

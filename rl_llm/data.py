@@ -12,7 +12,7 @@ class PreferenceDataset(Dataset):
         tokenizer: PreTrainedTokenizer,
         max_length: int = 512,
         split: str = "train",
-        subset_size: Optional[int] = None  # Added parameter for testing
+        subset_size: Optional[int] = None
     ):
         """
         Initialize the preference dataset.
@@ -36,11 +36,36 @@ class PreferenceDataset(Dataset):
             }
             actual_split = split_map.get(split, split)
             self.dataset = load_dataset("HuggingFaceH4/ultrafeedback_binarized", split=actual_split)
-            # Remove the subset limitation
             if subset_size is not None:
                 self.dataset = self.dataset.select(range(min(subset_size, len(self.dataset))))
         elif dataset_name == "smoltalk":
             self.dataset = load_dataset("HuggingFaceTB/smol-smoltalk", split=split)
+            
+            # For SmolTalk dataset:
+            # 1. Filter for length-2 conversations (1 user + 1 assistant message)
+            self.dataset = self.dataset.filter(
+                lambda x: len(x["messages"]) == 2 and 
+                x["messages"][0]["role"] == "user" and 
+                x["messages"][1]["role"] == "assistant"
+            )
+            
+            # 2. Calculate 95th percentile of token lengths using a sample
+            if len(self.dataset) > 0:
+                # Use a sample of 1000 conversations for faster processing
+                sample_size = min(1000, len(self.dataset))
+                sample_indices = np.random.choice(len(self.dataset), sample_size, replace=False)
+                token_lengths = []
+                
+                for idx in sample_indices:
+                    item = self.dataset[int(idx)]
+                    text = self._format_conversation(item["messages"])
+                    length = len(self.tokenizer.encode(text))
+                    token_lengths.append(length)
+                
+                # Set max_length to 95th percentile
+                self.max_length = int(np.percentile(token_lengths, 95))
+                print(f"SmolTalk dataset: Setting max_length to 95th percentile: {self.max_length} (calculated from {sample_size} samples)")
+            
             if subset_size is not None:
                 self.dataset = self.dataset.select(range(min(subset_size, len(self.dataset))))
         else:
@@ -103,6 +128,9 @@ class PreferenceDataset(Dataset):
                     last_assistant_response,
                     add_special_tokens=False
                 )
+                # Truncate from the right (completion side)
+                if len(response_tokens) > self.max_length:
+                    response_tokens = response_tokens[-self.max_length:]
                 encodings["attention_mask"][0, :-len(response_tokens)] = 0
         elif self.dataset_name == "ultrafeedback":
             # For UltraFeedback, mask out the chosen response
@@ -121,9 +149,7 @@ class PreferenceDataset(Dataset):
                     add_special_tokens=False
                 )
                 encodings["attention_mask"][0, :-len(chosen_tokens)] = 0
-            # else: do not modify attention_mask if split is too short
         
-        # Do NOT move tensors to device here
         return encodings
 
     def __len__(self) -> int:
@@ -134,7 +160,6 @@ class PreferenceDataset(Dataset):
         
         if self.dataset_name == "smoltalk":
             # Format SmolTalk conversation
-            # The dataset has a 'messages' field containing the conversation
             text = self._format_conversation(item["messages"])
             encodings = self._tokenize(text)
             

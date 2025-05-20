@@ -1,6 +1,6 @@
 # RL-LLM Training Pipeline
 
-This repository contains a training pipeline for fine-tuning language models using SFT (Supervised Fine-Tuning), DPO (Direct Preference Optimization), and RLOO (REINFORCE Leave One-Out) methods, with integrated Weights & Biands tracking.
+This repository contains a training pipeline for fine-tuning language models using SFT (Supervised Fine-Tuning), DPO (Direct Preference Optimization), and RLOO (REINFORCE Leave One-Out) methods, with integrated Weights & Biands tracking and Nemotron reward model evaluation.
 
 ## Setup
 
@@ -15,7 +15,7 @@ conda activate rl_llm
 pip install -r requirements.txt
 ```
 
-3. Set up Weights & Biases:
+3. Set up Weights & Biands:
 ```bash
 wandb login
 ```
@@ -29,10 +29,10 @@ You can run the entire training and evaluation pipeline with a single script:
 ```
 
 This script will:
-1. Run SFT training
-2. Run DPO training (using the SFT model)
-3. Run RLOO training
-4. Evaluate all three models
+1. Run SFT training on the SmolTalk dataset
+2. Run DPO training (using the SFT model) on the UltraFeedback dataset
+3. Run RLOO training on the UltraFeedback dataset
+4. Evaluate all three models using the Nemotron 70B reward model
 5. Log all results to Weights & Biands
 
 The full pipeline will run in sequence and can take several hours to complete. Consider using tmux to run it in the background:
@@ -41,6 +41,13 @@ The full pipeline will run in sequence and can take several hours to complete. C
 tmux new-session -d -s rl_llm_training './run_all.sh'
 tmux attach-session -t rl_llm_training  # To monitor progress
 ```
+
+## Memory Management
+
+The pipeline includes automatic GPU memory management:
+- GPU memory is cleared between training phases
+- Memory is also cleared between batches and epochs
+- Each training function uses a try/except/finally pattern to ensure proper cleanup
 
 ## Individual Training Commands
 
@@ -56,6 +63,8 @@ python train.py --method sft \
     --output_dir "outputs/sft" \
     --use_wandb
 ```
+
+For SmolTalk dataset, the pipeline automatically calculates an optimal max_length using the 95th percentile of token lengths from the dataset, so the specified max_length serves as an initial value.
 
 ### DPO Training
 ```bash
@@ -85,6 +94,8 @@ python train.py --method rloo \
 
 ## Evaluation
 
+The evaluation pipeline uses the Nemotron 70B reward model (via NVIDIA API) to compare the trained model against a reference model.
+
 To evaluate a trained model:
 ```bash
 python evaluate.py \
@@ -94,6 +105,18 @@ python evaluate.py \
     --output_dir "outputs/dpo/eval" \
     --use_wandb
 ```
+
+The pipeline uses the "test_prefs" split of the UltraFeedback dataset for evaluation, ensuring proper separation between training and testing data.
+
+## Testing Pipeline
+
+For quick testing or debugging, you can use the test pipeline:
+
+```bash
+./run_test.sh
+```
+
+This script runs a smaller version of the complete pipeline with limited data for faster testing.
 
 ## Weights & Biands Integration
 
@@ -111,7 +134,11 @@ To view your runs, visit: https://wandb.ai/[your-username]/cs224r_deeprl_final
 
 The pipeline supports two datasets:
 1. SmolTalk (`HuggingFaceTB/smol-smoltalk`): A dataset of conversations for SFT 
-2. UltraFeedback (`HuggingFaceH4/ultrafeedback_binarized`): A dataset of preference pairs for DPO training and RLOO training
+2. UltraFeedback (`HuggingFaceH4/ultrafeedback_binarized`): A dataset of preference pairs for DPO and RLOO training
+
+For UltraFeedback, the pipeline uses:
+- "train_prefs" split for training
+- "test_prefs" split for evaluation
 
 ## Training Methods
 
@@ -135,11 +162,12 @@ The pipeline supports two datasets:
      where y^(1),...,y^(k) are i.i.d samples from policy π_θ(·|x)
    - Generates multiple samples for each input to estimate the gradient
 
-## Evaluation
+## Evaluation Metrics
 
-The evaluation pipeline uses the Nemotron reward model to compare the trained model against a reference model. Metrics include:
-- Win rate: Percentage of times the trained model's responses are preferred
-- Average reward: Mean reward score for trained model responses
-- Average reference reward: Mean reward score for reference model responses
-- Reward improvement: Difference between trained and reference rewards
-- Length ratio: Ratio of trained model response length to reference model response length
+The Nemotron reward model evaluation provides the following metrics:
+- **Win rate**: Percentage of times the trained model's responses are preferred
+- **Average model reward**: Mean reward score for trained model responses
+- **Average reference reward**: Mean reward score for reference model responses
+- **Reward improvement**: Difference between trained and reference rewards
+
+The reward model uses the Bradley-Terry preference model to score responses, with higher scores indicating better quality.
