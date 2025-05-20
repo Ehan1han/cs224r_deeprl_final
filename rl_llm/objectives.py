@@ -11,7 +11,8 @@ class SFTTrainer:
         learning_rate: float = 1e-5,
         beta1: float = 0.9,
         beta2: float = 0.999,
-        weight_decay: float = 0.01
+        weight_decay: float = 0.01,
+        gradient_accumulation_steps: int = 4
     ):
         """
         Initialize SFT trainer.
@@ -22,6 +23,7 @@ class SFTTrainer:
             beta1: Beta1 for Adam optimizer
             beta2: Beta2 for Adam optimizer
             weight_decay: Weight decay for optimizer
+            gradient_accumulation_steps: Number of steps to accumulate gradients
         """
         self.model = model
         self.optimizer = torch.optim.AdamW(
@@ -30,6 +32,8 @@ class SFTTrainer:
             betas=(beta1, beta2),
             weight_decay=weight_decay
         )
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.current_step = 0
         
     def train_step(
         self,
@@ -49,7 +53,10 @@ class SFTTrainer:
             Dictionary containing loss value
         """
         self.model.train()
-        self.optimizer.zero_grad()
+        
+        # Only zero the gradients for the first step in the accumulation cycle
+        if self.current_step % self.gradient_accumulation_steps == 0:
+            self.optimizer.zero_grad()
         
         outputs = self.model(
             input_ids=input_ids,
@@ -58,8 +65,16 @@ class SFTTrainer:
         )
         
         loss = compute_loss(outputs, labels, attention_mask)
-        loss.backward()
-        self.optimizer.step()
+        
+        # Scale the loss by the number of accumulation steps
+        scaled_loss = loss / self.gradient_accumulation_steps
+        scaled_loss.backward()
+        
+        # Only perform optimization step after accumulating gradients
+        if (self.current_step + 1) % self.gradient_accumulation_steps == 0:
+            self.optimizer.step()
+        
+        self.current_step += 1
         
         return {"loss": loss.item()}
 
@@ -70,7 +85,8 @@ class DPOTrainer:
         ref_model: QwenModel,
         beta: float = 0.1,
         learning_rate: float = 1e-5,
-        max_grad_norm: float = 1.0
+        max_grad_norm: float = 1.0,
+        gradient_accumulation_steps: int = 4
     ):
         """
         Initialize DPO trainer.
@@ -81,6 +97,7 @@ class DPOTrainer:
             beta: Temperature parameter for DPO
             learning_rate: Learning rate for optimizer
             max_grad_norm: Maximum gradient norm for clipping
+            gradient_accumulation_steps: Number of steps to accumulate gradients
         """
         self.model = model
         self.ref_model = ref_model
@@ -88,6 +105,8 @@ class DPOTrainer:
         self.max_grad_norm = max_grad_norm
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
         self.device = next(model.parameters()).device
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.current_step = 0
         
     def train_step(
         self,
@@ -114,7 +133,10 @@ class DPOTrainer:
         """
         self.model.train()
         self.ref_model.eval()
-        self.optimizer.zero_grad()
+        
+        # Only zero the gradients for the first step in the accumulation cycle
+        if self.current_step % self.gradient_accumulation_steps == 0:
+            self.optimizer.zero_grad()
         
         # Move inputs to device
         chosen_ids = chosen_ids.to(self.device)
@@ -191,12 +213,17 @@ class DPOTrainer:
         # Compute DPO loss: -E[log σ(β * (log πθ(yw|x)/πref(yw|x) - log πθ(yl|x)/πref(yl|x)))]
         loss = -F.logsigmoid(self.beta * (chosen_ratio - rejected_ratio)).mean()
         
-        loss.backward()
+        # Scale the loss by the number of accumulation steps
+        scaled_loss = loss / self.gradient_accumulation_steps
+        scaled_loss.backward()
         
-        # Clip gradients
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+        # Only perform optimization step after accumulating gradients
+        if (self.current_step + 1) % self.gradient_accumulation_steps == 0:
+            # Clip gradients
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            self.optimizer.step()
         
-        self.optimizer.step()
+        self.current_step += 1
         
         return {
             "loss": loss.item(),
@@ -211,7 +238,8 @@ class RLOOTrainer:
         reward_model: nn.Module,
         learning_rate: float = 1e-5,
         num_samples: int = 4,
-        max_grad_norm: float = 1.0
+        max_grad_norm: float = 1.0,
+        gradient_accumulation_steps: int = 4
     ):
         """
         Initialize RLOO trainer.
@@ -222,6 +250,7 @@ class RLOOTrainer:
             learning_rate: Learning rate for optimizer
             num_samples: Number of samples for RLOO (k in the formula)
             max_grad_norm: Maximum gradient norm for clipping
+            gradient_accumulation_steps: Number of steps to accumulate gradients
         """
         self.model = model
         self.reward_model = reward_model
@@ -229,6 +258,8 @@ class RLOOTrainer:
         self.max_grad_norm = max_grad_norm
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
         self.device = next(model.parameters()).device
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.current_step = 0
         
     def train_step(
         self,
@@ -255,7 +286,10 @@ class RLOOTrainer:
         """
         self.model.train()
         self.reward_model.eval()
-        self.optimizer.zero_grad()
+        
+        # Only zero the gradients for the first step in the accumulation cycle
+        if self.current_step % self.gradient_accumulation_steps == 0:
+            self.optimizer.zero_grad()
         
         # Move inputs to device
         prompt_ids = prompt_ids.to(self.device)
@@ -323,12 +357,17 @@ class RLOOTrainer:
         total_loss = -total_loss / (batch_size * self.num_samples)  # Negative because we want to maximize
         avg_reward = sum(total_rewards) / len(total_rewards)
         
-        total_loss.backward()
+        # Scale the loss by the number of accumulation steps
+        scaled_loss = total_loss / self.gradient_accumulation_steps
+        scaled_loss.backward()
         
-        # Clip gradients
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+        # Only perform optimization step after accumulating gradients
+        if (self.current_step + 1) % self.gradient_accumulation_steps == 0:
+            # Clip gradients
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            self.optimizer.step()
         
-        self.optimizer.step()
+        self.current_step += 1
         
         return {
             "loss": total_loss.item(),

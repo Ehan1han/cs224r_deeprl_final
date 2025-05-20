@@ -14,7 +14,7 @@ python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/d
 
 # SFT
 echo "Training SFT model..."
-python train.py --method sft --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-6 --num_epochs 2 --max_length 512 --output_dir "outputs/sft" --use_wandb
+python train.py --method sft --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-6 --num_epochs 1 --max_length 512 --output_dir "outputs/sft" --use_wandb --gradient_accumulation_steps 4
 
 # Verify SFT model exists
 if [ ! -d "outputs/sft/final" ]; then
@@ -28,7 +28,7 @@ python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/d
 
 # DPO (using fine-tuned SFT model)
 echo "Training DPO model..."
-python train.py --method dpo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-6 --num_epochs 2 --max_length 512 --output_dir "outputs/dpo" --sft_model_path "outputs/sft/final" --use_wandb
+python train.py --method dpo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-6 --num_epochs 1 --max_length 512 --output_dir "outputs/dpo" --sft_model_path "outputs/sft/final" --use_wandb --gradient_accumulation_steps 4
 
 # Clear GPU memory after DPO
 echo "Clearing GPU memory after DPO..."
@@ -36,7 +36,7 @@ python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/d
 
 # RLOO
 echo "Training RLOO model..."
-python train.py --method rloo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-6 --num_epochs 2 --max_length 512 --output_dir "outputs/rloo" --use_wandb
+python train.py --method rloo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 4 --learning_rate 1e-6 --num_epochs 1 --max_length 512 --output_dir "outputs/rloo" --use_wandb --gradient_accumulation_steps 4
 
 # Clear GPU memory after RLOO
 echo "Clearing GPU memory after RLOO..."

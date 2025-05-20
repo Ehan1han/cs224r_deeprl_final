@@ -4,8 +4,8 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate rl_llm
 
-# Run the test pipeline
-python test_pipeline.py
+# Run the test pipeline with gradient accumulation (effective batch size = 16)
+python test_pipeline.py --gradient_accumulation_steps 4
 
 # Evaluate all three models
 echo "Evaluating SFT model..."

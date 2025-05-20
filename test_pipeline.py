@@ -16,7 +16,8 @@ def test_pipeline(
     num_epochs: int = 2,
     max_length: int = 512,
     output_dir: str = "outputs/test",
-    use_wandb: bool = False
+    use_wandb: bool = False,
+    gradient_accumulation_steps: int = 4
 ):
     """
     Run a test version of the complete training pipeline with a small dataset.
@@ -30,9 +31,12 @@ def test_pipeline(
         max_length: Maximum sequence length
         output_dir: Base directory for outputs
         use_wandb: Whether to use Weights & Biases logging
+        gradient_accumulation_steps: Number of steps to accumulate gradients
     """
     print("Starting test pipeline...")
     print(f"Using test size: {test_size} samples")
+    print(f"Using gradient accumulation with {gradient_accumulation_steps} steps")
+    print(f"Effective batch size: {batch_size * gradient_accumulation_steps}")
     
     # Create output directories
     sft_dir = os.path.join(output_dir, "sft")
@@ -63,7 +67,8 @@ def test_pipeline(
             max_length=max_length,
             output_dir=sft_dir,
             use_wandb=use_wandb,
-            dataloader=sft_dataloader
+            dataloader=sft_dataloader,
+            gradient_accumulation_steps=gradient_accumulation_steps
         )
 
         # Explicitly clear GPU memory after SFT
@@ -93,7 +98,8 @@ def test_pipeline(
             sft_model_path=os.path.join(sft_dir, "final"),
             output_dir=dpo_dir,
             use_wandb=use_wandb,
-            dataloader=dpo_dataloader
+            dataloader=dpo_dataloader,
+            gradient_accumulation_steps=gradient_accumulation_steps
         )
 
         # Explicitly clear GPU memory after DPO
@@ -122,7 +128,8 @@ def test_pipeline(
             max_length=max_length,
             output_dir=rloo_dir,
             use_wandb=use_wandb,
-            dataloader=rloo_dataloader
+            dataloader=rloo_dataloader,
+            gradient_accumulation_steps=gradient_accumulation_steps
         )
         
         print("\nTest pipeline completed successfully!")

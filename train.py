@@ -35,7 +35,8 @@ def train_sft(
     max_length: int = 512,
     output_dir: str = "outputs/sft",
     use_wandb: bool = True,
-    dataloader: Optional[DataLoader] = None
+    dataloader: Optional[DataLoader] = None,
+    gradient_accumulation_steps: int = 4
 ):
     """Train model using SFT."""
     try:
@@ -52,7 +53,8 @@ def train_sft(
                     "learning_rate": learning_rate,
                     "num_epochs": num_epochs,
                     "max_length": max_length,
-                    "method": "sft"
+                    "method": "sft",
+                    "effective_batch_size": batch_size * gradient_accumulation_steps
                 }
             )
         
@@ -75,7 +77,11 @@ def train_sft(
             dataloader = create_dataloader(dataset, batch_size=batch_size)
         
         # Initialize trainer
-        trainer = SFTTrainer(model, learning_rate=learning_rate)
+        trainer = SFTTrainer(
+            model, 
+            learning_rate=learning_rate,
+            gradient_accumulation_steps=gradient_accumulation_steps
+        )
         
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
@@ -145,7 +151,8 @@ def train_dpo(
     sft_model_path: str = None,
     output_dir: str = "outputs/dpo",
     use_wandb: bool = True,
-    dataloader: Optional[DataLoader] = None
+    dataloader: Optional[DataLoader] = None,
+    gradient_accumulation_steps: int = 4
 ):
     """Train model using DPO."""
     try:
@@ -163,7 +170,8 @@ def train_dpo(
                     "num_epochs": num_epochs,
                     "max_length": max_length,
                     "sft_model_path": sft_model_path,
-                    "method": "dpo"
+                    "method": "dpo",
+                    "effective_batch_size": batch_size * gradient_accumulation_steps
                 }
             )
         
@@ -186,7 +194,8 @@ def train_dpo(
             model=model,
             ref_model=ref_model,
             beta=0.1,
-            learning_rate=learning_rate
+            learning_rate=learning_rate,
+            gradient_accumulation_steps=gradient_accumulation_steps
         )
         
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -251,7 +260,8 @@ def train_rloo(
     max_length: int = 512,
     output_dir: str = "outputs/rloo",
     use_wandb: bool = True,
-    dataloader: Optional[DataLoader] = None
+    dataloader: Optional[DataLoader] = None,
+    gradient_accumulation_steps: int = 4
 ):
     """Train model using RLOO."""
     try:
@@ -268,7 +278,8 @@ def train_rloo(
                     "learning_rate": learning_rate,
                     "num_epochs": num_epochs,
                     "max_length": max_length,
-                    "method": "rloo"
+                    "method": "rloo",
+                    "effective_batch_size": batch_size * gradient_accumulation_steps
                 }
             )
         
@@ -293,7 +304,8 @@ def train_rloo(
             model=model,
             reward_model=reward_model,
             learning_rate=learning_rate,
-            num_samples=4  # Number of samples for RLOO
+            num_samples=4,  # Number of samples for RLOO
+            gradient_accumulation_steps=gradient_accumulation_steps
         )
         
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -410,6 +422,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str)
     parser.add_argument("--subset_size", type=int, default=100)
     parser.add_argument("--use_wandb", action="store_true", help="Enable W&B logging")
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Number of steps to accumulate gradients")
     args = parser.parse_args()
     
     # Set default dataset based on method if not specified
@@ -428,7 +441,8 @@ if __name__ == "__main__":
             num_epochs=args.num_epochs,
             max_length=args.max_length,
             output_dir=args.output_dir or "outputs/sft",
-            use_wandb=args.use_wandb
+            use_wandb=args.use_wandb,
+            gradient_accumulation_steps=args.gradient_accumulation_steps
         )
     elif args.method == "dpo":
         if not args.sft_model_path:
@@ -442,7 +456,8 @@ if __name__ == "__main__":
             max_length=args.max_length,
             sft_model_path=args.sft_model_path,
             output_dir=args.output_dir or "outputs/dpo",
-            use_wandb=args.use_wandb
+            use_wandb=args.use_wandb,
+            gradient_accumulation_steps=args.gradient_accumulation_steps
         )
     elif args.method == "rloo":
         train_rloo(
@@ -453,7 +468,8 @@ if __name__ == "__main__":
             num_epochs=args.num_epochs,
             max_length=args.max_length,
             output_dir=args.output_dir or "outputs/rloo",
-            use_wandb=args.use_wandb
+            use_wandb=args.use_wandb,
+            gradient_accumulation_steps=args.gradient_accumulation_steps
         )
     elif args.method == "eval":
         if not args.model_path:
