@@ -152,7 +152,9 @@ def train_dpo(
     output_dir: str = "outputs/dpo",
     use_wandb: bool = True,
     dataloader: Optional[DataLoader] = None,
-    gradient_accumulation_steps: int = 4
+    gradient_accumulation_steps: int = 4,
+    subset_size: Optional[int] = None,
+    max_steps: Optional[int] = None
 ):
     """Train model using DPO."""
     try:
@@ -161,7 +163,7 @@ def train_dpo(
             run = wandb.init(
                 entity="zhao111han-stanford-university",
                 project="cs224r_deeprl_final",
-                name=f"dpo_{model_name.split('/')[-1]}_{dataset_name}",
+                name=f"dpo_{model_name.split('/')[-1]}_{dataset_name}{'_'+str(subset_size) if subset_size else ''}",
                 config={
                     "model_name": model_name,
                     "dataset_name": dataset_name,
@@ -171,7 +173,8 @@ def train_dpo(
                     "max_length": max_length,
                     "sft_model_path": sft_model_path,
                     "method": "dpo",
-                    "effective_batch_size": batch_size * gradient_accumulation_steps
+                    "effective_batch_size": batch_size * gradient_accumulation_steps,
+                    "subset_size": subset_size
                 }
             )
         
@@ -185,58 +188,33 @@ def train_dpo(
             dataset = PreferenceDataset(
                 dataset_name=dataset_name,
                 tokenizer=tokenizer,
-                max_length=max_length
+                max_length=max_length,
+                subset_size=subset_size
             )
             dataloader = create_dataloader(dataset, batch_size=batch_size)
+            
+            # Print dataset information
+            print(f"Training on {len(dataset)} examples from {dataset_name}" + 
+                  (f" (subset: {subset_size})" if subset_size else ""))
         
         # Initialize trainer
         trainer = DPOTrainer(
             model=model,
             ref_model=ref_model,
-            beta=0.1,
-            learning_rate=learning_rate,
+            beta=0.2,
+            learning_rate=2e-6,
             gradient_accumulation_steps=gradient_accumulation_steps
         )
         
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Training loop
-        for epoch in range(num_epochs):
-            total_loss = 0
-            for batch in tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}"):
-                # Move batch to device
-                batch = {k: v.to(device) for k, v in batch.items()}
-                metrics = trainer.train_step(
-                    prompt_ids=batch["chosen_input_ids"],
-                    chosen_ids=batch["chosen_input_ids"],
-                    rejected_ids=batch["rejected_input_ids"],
-                    prompt_mask=batch["chosen_attention_mask"],
-                    chosen_mask=batch["chosen_attention_mask"],
-                    rejected_mask=batch["rejected_attention_mask"]
-                )
-                total_loss += metrics["loss"]
-                if use_wandb:
-                    wandb.log({"loss": metrics["loss"], "epoch": epoch + 1})
-                else:
-                    print(f"Batch loss: {metrics['loss']:.4f}")
-                
-                # Clear memory after each batch
-                del batch
-                clear_gpu_memory()
-            
-            avg_loss = total_loss / len(dataloader)
-            print(f"Epoch {epoch + 1}/{num_epochs}, Average Loss: {avg_loss:.4f}")
-            
-            # Log epoch metrics
-            if use_wandb:
-                wandb.log({"avg_loss": avg_loss, "epoch": epoch + 1})
-            
-            # Save checkpoint
-            os.makedirs(output_dir, exist_ok=True)
-            model.save_pretrained(os.path.join(output_dir, f"checkpoint-{epoch + 1}"))
-            
-            # Clear memory after each epoch
-            clear_gpu_memory()
+        # Train the model
+        if max_steps is not None and max_steps > 0:
+            # If max_steps is provided, use it instead of epochs
+            trainer.train(max_steps=max_steps)
+        else:
+            # Otherwise use epochs as before
+            trainer.train()
         
         # Save final model
         model.save_pretrained(os.path.join(output_dir, "final"))
@@ -258,10 +236,13 @@ def train_rloo(
     learning_rate: float = 1e-5,
     num_epochs: int = 3,
     max_length: int = 512,
+    sft_model_path: str = None,
     output_dir: str = "outputs/rloo",
     use_wandb: bool = True,
     dataloader: Optional[DataLoader] = None,
-    gradient_accumulation_steps: int = 4
+    gradient_accumulation_steps: int = 4,
+    subset_size: Optional[int] = None,
+    max_steps: Optional[int] = None
 ):
     """Train model using RLOO."""
     try:
@@ -270,7 +251,7 @@ def train_rloo(
             run = wandb.init(
                 entity="zhao111han-stanford-university",
                 project="cs224r_deeprl_final",
-                name=f"rloo_{model_name.split('/')[-1]}_{dataset_name}",
+                name=f"rloo_{model_name.split('/')[-1]}_{dataset_name}{'_'+str(subset_size) if subset_size else ''}",
                 config={
                     "model_name": model_name,
                     "dataset_name": dataset_name,
@@ -278,14 +259,16 @@ def train_rloo(
                     "learning_rate": learning_rate,
                     "num_epochs": num_epochs,
                     "max_length": max_length,
+                    "sft_model_path": sft_model_path,
                     "method": "rloo",
-                    "effective_batch_size": batch_size * gradient_accumulation_steps
+                    "effective_batch_size": batch_size * gradient_accumulation_steps,
+                    "subset_size": subset_size
                 }
             )
         
-        # Initialize model and tokenizer
-        model = QwenModel(model_name)
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        # Initialize model and tokenizer from SFT path
+        model = QwenModel.from_pretrained(sft_model_path)
+        tokenizer = AutoTokenizer.from_pretrained(sft_model_path)
         
         # Initialize reward model
         reward_model = RewardModel(model_name)
@@ -295,9 +278,14 @@ def train_rloo(
             dataset = PreferenceDataset(
                 dataset_name=dataset_name,
                 tokenizer=tokenizer,
-                max_length=max_length
+                max_length=max_length,
+                subset_size=subset_size
             )
             dataloader = create_dataloader(dataset, batch_size=batch_size)
+            
+            # Print dataset information
+            print(f"Training on {len(dataset)} examples from {dataset_name}" + 
+                  (f" (subset: {subset_size})" if subset_size else ""))
         
         # Initialize trainer
         trainer = RLOOTrainer(
@@ -310,43 +298,13 @@ def train_rloo(
         
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Training loop
-        for epoch in range(num_epochs):
-            total_loss = 0
-            for batch in tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}"):
-                # Move batch to device
-                batch = {k: v.to(device) for k, v in batch.items()}
-                metrics = trainer.train_step(
-                    prompt_ids=batch["chosen_input_ids"],
-                    chosen_ids=batch["chosen_input_ids"],
-                    rejected_ids=batch["rejected_input_ids"],
-                    prompt_mask=batch["chosen_attention_mask"],
-                    chosen_mask=batch["chosen_attention_mask"],
-                    rejected_mask=batch["rejected_attention_mask"]
-                )
-                total_loss += metrics["loss"]
-                if use_wandb:
-                    wandb.log({"loss": metrics["loss"], "epoch": epoch + 1})
-                else:
-                    print(f"Batch loss: {metrics['loss']:.4f}")
-                
-                # Clear memory after each batch
-                del batch
-                clear_gpu_memory()
-            
-            avg_loss = total_loss / len(dataloader)
-            print(f"Epoch {epoch + 1}/{num_epochs}, Average Loss: {avg_loss:.4f}")
-            
-            # Log epoch metrics
-            if use_wandb:
-                wandb.log({"avg_loss": avg_loss, "epoch": epoch + 1})
-            
-            # Save checkpoint
-            os.makedirs(output_dir, exist_ok=True)
-            model.save_pretrained(os.path.join(output_dir, f"checkpoint-{epoch + 1}"))
-            
-            # Clear memory after each epoch
-            clear_gpu_memory()
+        # Train the model
+        if max_steps is not None and max_steps > 0:
+            # If max_steps is provided, use it instead of epochs
+            trainer.train(max_steps=max_steps)
+        else:
+            # Otherwise use epochs as before
+            trainer.train()
         
         # Save final model
         model.save_pretrained(os.path.join(output_dir, "final"))
@@ -420,9 +378,10 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, help="Path to model for evaluation")
     parser.add_argument("--num_prompts", type=int, default=100, help="Number of prompts for evaluation")
     parser.add_argument("--output_dir", type=str)
-    parser.add_argument("--subset_size", type=int, default=100)
+    parser.add_argument("--subset_size", type=int, default=None, help="Number of examples to use from dataset (for debugging/testing)")
     parser.add_argument("--use_wandb", action="store_true", help="Enable W&B logging")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Number of steps to accumulate gradients")
+    parser.add_argument("--max_steps", type=int, default=None, help="Maximum number of training steps (overrides num_epochs if set)")
     args = parser.parse_args()
     
     # Set default dataset based on method if not specified
@@ -457,9 +416,13 @@ if __name__ == "__main__":
             sft_model_path=args.sft_model_path,
             output_dir=args.output_dir or "outputs/dpo",
             use_wandb=args.use_wandb,
-            gradient_accumulation_steps=args.gradient_accumulation_steps
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            subset_size=args.subset_size,
+            max_steps=args.max_steps
         )
     elif args.method == "rloo":
+        if not args.sft_model_path:
+            raise ValueError("sft_model_path is required for RLOO training")
         train_rloo(
             model_name=args.model_name,
             dataset_name=args.dataset_name,
@@ -467,9 +430,12 @@ if __name__ == "__main__":
             learning_rate=args.learning_rate,
             num_epochs=args.num_epochs,
             max_length=args.max_length,
+            sft_model_path=args.sft_model_path,
             output_dir=args.output_dir or "outputs/rloo",
             use_wandb=args.use_wandb,
-            gradient_accumulation_steps=args.gradient_accumulation_steps
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            subset_size=args.subset_size,
+            max_steps=args.max_steps
         )
     elif args.method == "eval":
         if not args.model_path:

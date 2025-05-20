@@ -83,7 +83,7 @@ class DPOTrainer:
         self,
         model: QwenModel,
         ref_model: QwenModel,
-        beta: float = 0.1,
+        beta: float = 0.2,
         learning_rate: float = 1e-5,
         max_grad_norm: float = 1.0,
         gradient_accumulation_steps: int = 4
