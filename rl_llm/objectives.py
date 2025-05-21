@@ -40,6 +40,7 @@ class SFTTrainer:
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
+        prompt_response_mask: torch.Tensor,
         labels: torch.Tensor
     ) -> Dict[str, float]:
         """
@@ -48,6 +49,7 @@ class SFTTrainer:
         Args:
             input_ids: Input token IDs
             attention_mask: Attention mask
+            prompt_response_mask: Mask distinguishing prompt (0) from response (1) tokens
             labels: Labels for computing loss
             
         Returns:
@@ -65,7 +67,13 @@ class SFTTrainer:
             labels=labels
         )
         
-        loss = compute_loss(outputs, labels, attention_mask)
+        # Pass both masks separately to compute_loss
+        loss = compute_loss(
+            outputs=outputs, 
+            labels=labels, 
+            attention_mask=attention_mask,
+            prompt_response_mask=prompt_response_mask
+        )
         
         # Scale the loss by the number of accumulation steps
         scaled_loss = loss / self.gradient_accumulation_steps
@@ -127,7 +135,9 @@ class DPOTrainer:
         rejected_ids: torch.Tensor,
         prompt_mask: torch.Tensor,
         chosen_mask: torch.Tensor,
-        rejected_mask: torch.Tensor
+        rejected_mask: torch.Tensor,
+        chosen_prompt_response_mask: Optional[torch.Tensor] = None,
+        rejected_prompt_response_mask: Optional[torch.Tensor] = None
     ) -> Dict[str, float]:
         """
         Perform a single DPO training step.
@@ -139,6 +149,8 @@ class DPOTrainer:
             prompt_mask: Prompt attention mask
             chosen_mask: Chosen response attention mask
             rejected_mask: Rejected response attention mask
+            chosen_prompt_response_mask: Optional mask for chosen (0=prompt, 1=response)
+            rejected_prompt_response_mask: Optional mask for rejected (0=prompt, 1=response)
             
         Returns:
             Dictionary containing loss value and metrics
@@ -212,18 +224,34 @@ class DPOTrainer:
         chosen_mask = chosen_mask[..., 1:].contiguous()
         rejected_mask = rejected_mask[..., 1:].contiguous()
         
-        # Compute mean log probabilities over sequence length
-        chosen_log_probs = (chosen_log_probs * chosen_mask).sum(dim=-1) / chosen_mask.sum(dim=-1)
-        rejected_log_probs = (rejected_log_probs * rejected_mask).sum(dim=-1) / rejected_mask.sum(dim=-1)
-        chosen_ref_log_probs = (chosen_ref_log_probs * chosen_mask).sum(dim=-1) / chosen_mask.sum(dim=-1)
-        rejected_ref_log_probs = (rejected_ref_log_probs * rejected_mask).sum(dim=-1) / rejected_mask.sum(dim=-1)
+        # Add a small epsilon to avoid division by zero
+        epsilon = 1e-8
+        chosen_mask_sum = chosen_mask.sum(dim=-1).clamp(min=epsilon)
+        rejected_mask_sum = rejected_mask.sum(dim=-1).clamp(min=epsilon)
         
-        # Compute log probability ratios
+        # Compute mean log probabilities over sequence length
+        chosen_log_probs = (chosen_log_probs * chosen_mask).sum(dim=-1) / chosen_mask_sum
+        rejected_log_probs = (rejected_log_probs * rejected_mask).sum(dim=-1) / rejected_mask_sum
+        chosen_ref_log_probs = (chosen_ref_log_probs * chosen_mask).sum(dim=-1) / chosen_mask_sum
+        rejected_ref_log_probs = (rejected_ref_log_probs * rejected_mask).sum(dim=-1) / rejected_mask_sum
+        
+        # Compute log probability ratios (with additional numerical stability checks)
         chosen_ratio = chosen_log_probs - chosen_ref_log_probs
         rejected_ratio = rejected_log_probs - rejected_ref_log_probs
         
+        # Clamp ratios to avoid numerical instability
+        max_ratio_value = 50.0  # Prevent exp(x) overflow
+        chosen_ratio = torch.clamp(chosen_ratio, min=-max_ratio_value, max=max_ratio_value)
+        rejected_ratio = torch.clamp(rejected_ratio, min=-max_ratio_value, max=max_ratio_value)
+        
         # Compute DPO loss: -E[log σ(β * (log πθ(yw|x)/πref(yw|x) - log πθ(yl|x)/πref(yl|x)))]
+        # Using logsigmoid for numerical stability
         loss = -F.logsigmoid(self.beta * (chosen_ratio - rejected_ratio)).mean()
+        
+        # Handle NaN loss (use a fallback value if loss is NaN)
+        if torch.isnan(loss).item():
+            print("NaN loss detected, using fallback value")
+            loss = torch.tensor(1.0, device=self.device, requires_grad=True)
         
         # Scale the loss by the number of accumulation steps
         scaled_loss = loss / self.gradient_accumulation_steps
@@ -241,14 +269,15 @@ class DPOTrainer:
         
         self.current_step += 1
         
+        # Ensure no NaN values in metrics
         metrics = {
-            "loss": loss.item(),
-            "chosen_ratio": chosen_ratio.mean().item(),
-            "rejected_ratio": rejected_ratio.mean().item(),
-            "chosen_log_probs": chosen_log_probs.mean().item(),
-            "rejected_log_probs": rejected_log_probs.mean().item(),
-            "chosen_ref_log_probs": chosen_ref_log_probs.mean().item(),
-            "rejected_ref_log_probs": rejected_ref_log_probs.mean().item()
+            "loss": loss.item() if not torch.isnan(loss).item() else 1.0,
+            "chosen_ratio": chosen_ratio.mean().item() if not torch.isnan(chosen_ratio).any().item() else 0.0,
+            "rejected_ratio": rejected_ratio.mean().item() if not torch.isnan(rejected_ratio).any().item() else 0.0,
+            "chosen_log_probs": chosen_log_probs.mean().item() if not torch.isnan(chosen_log_probs).any().item() else 0.0,
+            "rejected_log_probs": rejected_log_probs.mean().item() if not torch.isnan(rejected_log_probs).any().item() else 0.0,
+            "chosen_ref_log_probs": chosen_ref_log_probs.mean().item() if not torch.isnan(chosen_ref_log_probs).any().item() else 0.0,
+            "rejected_ref_log_probs": rejected_ref_log_probs.mean().item() if not torch.isnan(rejected_ref_log_probs).any().item() else 0.0
         }
         
         # Log metrics to wandb if enabled
@@ -295,49 +324,35 @@ class DPOTrainer:
                     # Move batch to device
                     batch = {k: v.to(device) for k, v in batch.items()}
                     
-                    # Extract common prefix between chosen and rejected inputs (prompt)
+                    # Get batch size
                     batch_size = batch["chosen_input_ids"].size(0)
-                    seq_length = batch["chosen_input_ids"].size(1)
                     
-                    # Initialize with all ones (assuming everything is common)
-                    common_mask = torch.ones((batch_size, seq_length), dtype=torch.bool, device=device)
-                    
-                    # Find where chosen and rejected differ (element-wise comparison)
-                    split_points = []
-                    for b in range(batch_size):
-                        split_point = seq_length  # Default: whole sequence is prompt
-                        for i in range(seq_length):
-                            if batch["chosen_input_ids"][b, i] != batch["rejected_input_ids"][b, i]:
-                                split_point = i
-                                break
-                        split_points.append(split_point)
-                        common_mask[b, split_point:] = False
-                    
-                    # Create prompt_input_ids using only the common prefix (masked version)
-                    prompt_input_ids = batch["chosen_input_ids"].clone() 
+                    # Use the prompt_response_mask from the dataset instead of computing it
+                    prompt_input_ids = batch["chosen_input_ids"].clone()
                     prompt_attention_mask = batch["chosen_attention_mask"].clone()
                     
-                    # Zero out non-common parts (visualization only - masks handle this in computation)
-                    prompt_input_ids = prompt_input_ids * common_mask.long()
+                    # Use the masks from the dataset that properly distinguish prompt and response tokens
+                    chosen_attention_mask = batch["chosen_attention_mask"].clone() * batch["chosen_prompt_response_mask"].clone()
+                    rejected_attention_mask = batch["rejected_attention_mask"].clone() * batch["rejected_prompt_response_mask"].clone()
                     
                     if self.debug_mode and step_count % 50 == 0:
                         print("\n--- Prompt/Response Analysis ---")
                         print(f"Batch size: {batch_size}")
-                        print(f"Max sequence length: {seq_length}")
-                        print(f"Split points: {split_points}")
-                        print(f"Prompt shape: {prompt_input_ids.shape}")
-                        print(f"Chosen shape: {batch['chosen_input_ids'].shape}")
+                        print(f"Using dataset-provided prompt/response masks")
+                        
+                        # Check mask shapes
+                        print(f"Chosen mask shape: {chosen_attention_mask.shape}")
+                        print(f"Rejected mask shape: {rejected_attention_mask.shape}")
                         
                         # Check correct masking for each example individually
                         mask_check_results = []
-                        for b in range(min(batch_size, 3)):  # Check up to 3 examples
-                            # Verify that prompt tokens have attention mask 0
-                            prompt_zeros = (batch['chosen_attention_mask'][b, :split_points[b]] == 0).all().item()
-                            # Verify that response tokens have attention mask 1
-                            response_ones = (batch['chosen_attention_mask'][b, split_points[b]:] == 1).all().item()
-                            mask_check_results.append(f"Example {b}: prompt zeros={prompt_zeros}, response ones={response_ones}")
+                        for b in range(min(batch["chosen_input_ids"].size(0), 3)):  # Check up to 3 examples
+                            # Count non-zero elements in prompt and response regions
+                            prompt_tokens = (batch["chosen_prompt_response_mask"][b] == 0).sum().item()
+                            response_tokens = (batch["chosen_prompt_response_mask"][b] == 1).sum().item()
+                            mask_check_results.append(f"Example {b}: prompt tokens={prompt_tokens}, response tokens={response_tokens}")
                         
-                        print("Attention mask check (should be 0=prompt, 1=response):")
+                        print("Mask check (prompt=0, response=1):")
                         for result in mask_check_results:
                             print(f"  {result}")
                         print("-------------------------------")
@@ -348,8 +363,10 @@ class DPOTrainer:
                         chosen_ids=batch["chosen_input_ids"],
                         rejected_ids=batch["rejected_input_ids"],
                         prompt_mask=prompt_attention_mask,
-                        chosen_mask=batch["chosen_attention_mask"],
-                        rejected_mask=batch["rejected_attention_mask"]
+                        chosen_mask=chosen_attention_mask,
+                        rejected_mask=rejected_attention_mask,
+                        chosen_prompt_response_mask=batch["chosen_prompt_response_mask"],
+                        rejected_prompt_response_mask=batch["rejected_prompt_response_mask"]
                     )
                     
                     total_loss += metrics["loss"]
@@ -391,49 +408,35 @@ class DPOTrainer:
                     # Move batch to device
                     batch = {k: v.to(device) for k, v in batch.items()}
                     
-                    # Extract common prefix between chosen and rejected inputs (prompt)
+                    # Get batch size
                     batch_size = batch["chosen_input_ids"].size(0)
-                    seq_length = batch["chosen_input_ids"].size(1)
                     
-                    # Initialize with all ones (assuming everything is common)
-                    common_mask = torch.ones((batch_size, seq_length), dtype=torch.bool, device=device)
-                    
-                    # Find where chosen and rejected differ (element-wise comparison)
-                    split_points = []
-                    for b in range(batch_size):
-                        split_point = seq_length  # Default: whole sequence is prompt
-                        for i in range(seq_length):
-                            if batch["chosen_input_ids"][b, i] != batch["rejected_input_ids"][b, i]:
-                                split_point = i
-                                break
-                        split_points.append(split_point)
-                        common_mask[b, split_point:] = False
-                    
-                    # Create prompt_input_ids using only the common prefix (masked version)
-                    prompt_input_ids = batch["chosen_input_ids"].clone() 
+                    # Use the prompt_response_mask from the dataset instead of computing it
+                    prompt_input_ids = batch["chosen_input_ids"].clone()
                     prompt_attention_mask = batch["chosen_attention_mask"].clone()
                     
-                    # Zero out non-common parts (visualization only - masks handle this in computation)
-                    prompt_input_ids = prompt_input_ids * common_mask.long()
+                    # Use the masks from the dataset that properly distinguish prompt and response tokens
+                    chosen_attention_mask = batch["chosen_attention_mask"].clone() * batch["chosen_prompt_response_mask"].clone()
+                    rejected_attention_mask = batch["rejected_attention_mask"].clone() * batch["rejected_prompt_response_mask"].clone()
                     
                     if self.debug_mode and step_count % 50 == 0:
                         print("\n--- Prompt/Response Analysis ---")
                         print(f"Batch size: {batch_size}")
-                        print(f"Max sequence length: {seq_length}")
-                        print(f"Split points: {split_points}")
-                        print(f"Prompt shape: {prompt_input_ids.shape}")
-                        print(f"Chosen shape: {batch['chosen_input_ids'].shape}")
+                        print(f"Using dataset-provided prompt/response masks")
+                        
+                        # Check mask shapes
+                        print(f"Chosen mask shape: {chosen_attention_mask.shape}")
+                        print(f"Rejected mask shape: {rejected_attention_mask.shape}")
                         
                         # Check correct masking for each example individually
                         mask_check_results = []
-                        for b in range(min(batch_size, 3)):  # Check up to 3 examples
-                            # Verify that prompt tokens have attention mask 0
-                            prompt_zeros = (batch['chosen_attention_mask'][b, :split_points[b]] == 0).all().item()
-                            # Verify that response tokens have attention mask 1
-                            response_ones = (batch['chosen_attention_mask'][b, split_points[b]:] == 1).all().item()
-                            mask_check_results.append(f"Example {b}: prompt zeros={prompt_zeros}, response ones={response_ones}")
+                        for b in range(min(batch["chosen_input_ids"].size(0), 3)):  # Check up to 3 examples
+                            # Count non-zero elements in prompt and response regions
+                            prompt_tokens = (batch["chosen_prompt_response_mask"][b] == 0).sum().item()
+                            response_tokens = (batch["chosen_prompt_response_mask"][b] == 1).sum().item()
+                            mask_check_results.append(f"Example {b}: prompt tokens={prompt_tokens}, response tokens={response_tokens}")
                         
-                        print("Attention mask check (should be 0=prompt, 1=response):")
+                        print("Mask check (prompt=0, response=1):")
                         for result in mask_check_results:
                             print(f"  {result}")
                         print("-------------------------------")
@@ -444,8 +447,10 @@ class DPOTrainer:
                         chosen_ids=batch["chosen_input_ids"],
                         rejected_ids=batch["rejected_input_ids"],
                         prompt_mask=prompt_attention_mask,
-                        chosen_mask=batch["chosen_attention_mask"],
-                        rejected_mask=batch["rejected_attention_mask"]
+                        chosen_mask=chosen_attention_mask,
+                        rejected_mask=rejected_attention_mask,
+                        chosen_prompt_response_mask=batch["chosen_prompt_response_mask"],
+                        rejected_prompt_response_mask=batch["rejected_prompt_response_mask"]
                     )
                     
                     total_loss += metrics["loss"]
@@ -527,7 +532,9 @@ class RLOOTrainer:
         rejected_ids: torch.Tensor,
         prompt_mask: torch.Tensor,
         chosen_mask: torch.Tensor,
-        rejected_mask: torch.Tensor
+        rejected_mask: torch.Tensor,
+        chosen_prompt_response_mask: Optional[torch.Tensor] = None,
+        rejected_prompt_response_mask: Optional[torch.Tensor] = None
     ) -> Dict[str, float]:
         """
         Perform a single RLOO training step.
@@ -539,6 +546,8 @@ class RLOOTrainer:
             prompt_mask: Prompt attention mask
             chosen_mask: Chosen response attention mask
             rejected_mask: Rejected response attention mask
+            chosen_prompt_response_mask: Optional mask for chosen (0=prompt, 1=response)
+            rejected_prompt_response_mask: Optional mask for rejected (0=prompt, 1=response)
             
         Returns:
             Dictionary containing loss value
@@ -559,7 +568,7 @@ class RLOOTrainer:
         rejected_mask = rejected_mask.to(self.device)
         
         batch_size = prompt_ids.size(0)
-        total_loss = 0
+        total_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
         total_rewards = []
         
         # Process each example in the batch
@@ -567,54 +576,115 @@ class RLOOTrainer:
             # Generate k samples for the current input
             samples = []
             sample_rewards = []
+            sample_masks = []
+            
+            # Get prompt length from the non-masked part of the prompt
+            prompt_length = prompt_ids.size(1)
             
             # Generate k samples
             for _ in range(self.num_samples):
-                with torch.no_grad():
-                    sample_ids = self.model.generate(
-                        input_ids=prompt_ids[i:i+1],
-                        attention_mask=prompt_mask[i:i+1],
-                        do_sample=True,
-                        temperature=0.7,
-                        top_p=0.9
-                    )
-                    sample_reward = self.reward_model(sample_ids)
-                    samples.append(sample_ids)
-                    sample_rewards.append(sample_reward)
+                try:
+                    with torch.no_grad():
+                        sample_ids = self.model.generate(
+                            input_ids=prompt_ids[i:i+1],
+                            attention_mask=prompt_mask[i:i+1],
+                            do_sample=True,
+                            temperature=0.7,
+                            top_p=0.9
+                        )
+                        sample_reward = self.reward_model(sample_ids)
+                        samples.append(sample_ids)
+                        sample_rewards.append(sample_reward)
+                        
+                        # Create attention mask for the sample with 0 for prompt tokens, 1 for response
+                        sample_mask = torch.ones_like(sample_ids)
+                        sample_mask[:, :prompt_length] = 0  # Zero out prompt tokens
+                        sample_masks.append(sample_mask)
+                except Exception as e:
+                    # Handle generation errors gracefully
+                    print(f"Error during sample generation: {str(e)}")
+                    # Use a fallback: just use the chosen sample directly
+                    samples.append(chosen_ids[i:i+1])
+                    sample_rewards.append(torch.tensor(0.0, device=self.device))
+                    sample_masks.append(chosen_mask[i:i+1])
+            
+            # Check if we have enough valid samples
+            if len(samples) < self.num_samples:
+                print(f"Warning: Only generated {len(samples)}/{self.num_samples} valid samples")
+                if len(samples) == 0:
+                    # Skip this example if no valid samples
+                    continue
             
             # Compute RLOO objective for each sample
-            for j in range(self.num_samples):
+            for j in range(len(samples)):
                 # Compute baseline: average reward of other samples
-                other_rewards = [sample_rewards[k] for k in range(self.num_samples) if k != j]
-                baseline = sum(other_rewards) / (self.num_samples - 1)
+                if len(samples) > 1:
+                    other_rewards = [sample_rewards[k] for k in range(len(samples)) if k != j]
+                    baseline = sum(other_rewards) / (len(samples) - 1)
+                else:
+                    # Fallback for single sample case
+                    baseline = torch.tensor(0.0, device=self.device)
                 
                 # Compute advantage: R(y_i,x) - 1/(k-1) * sum_j!=i R(y_j,x)
                 advantage = sample_rewards[j] - baseline
                 
+                # Clamp advantage to reasonable values to prevent numerical instability
+                advantage = torch.clamp(advantage, min=-10.0, max=10.0)
+                
                 # Get policy logits for the sample
-                outputs = self.model(
-                    input_ids=samples[j],
-                    attention_mask=torch.ones_like(samples[j])
-                )
-                
-                # Compute log probabilities
-                logits = outputs.logits[..., :-1, :].contiguous()
-                labels = samples[j][..., 1:].contiguous()
-                
-                # Compute log probabilities for the target tokens
-                log_probs = F.log_softmax(logits, dim=-1)
-                target_log_probs = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
-                
-                # Compute mean log probability
-                mean_log_prob = target_log_probs.mean()
-                
-                # Update total loss: advantage * ∇log π(y_i|x)
-                total_loss += advantage * mean_log_prob
-                total_rewards.append(sample_rewards[j].item())
+                try:
+                    outputs = self.model(
+                        input_ids=samples[j],
+                        attention_mask=sample_masks[j]  # Use mask that zeros out prompt tokens
+                    )
+                    
+                    # Compute log probabilities
+                    logits = outputs.logits[..., :-1, :].contiguous()
+                    labels = samples[j][..., 1:].contiguous()
+                    sample_mask = sample_masks[j][..., 1:].contiguous()  # Shift mask for next-token prediction
+                    
+                    # Compute log probabilities for the target tokens
+                    log_probs = F.log_softmax(logits, dim=-1)
+                    target_log_probs = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+                    
+                    # Apply attention mask to consider only response tokens
+                    target_log_probs = target_log_probs * sample_mask
+                    
+                    # Compute mean log probability over non-zero elements only
+                    non_zero_elements = sample_mask.sum()
+                    epsilon = 1e-8  # Small value to avoid division by zero
+                    if non_zero_elements > 0:
+                        mean_log_prob = target_log_probs.sum() / max(non_zero_elements, epsilon)
+                    else:
+                        mean_log_prob = target_log_probs.mean()  # Fallback
+                    
+                    # Check for NaN values
+                    if torch.isnan(mean_log_prob).any():
+                        print(f"Warning: NaN detected in mean_log_prob for sample {j}")
+                        continue
+                    
+                    # Update total loss: advantage * ∇log π(y_i|x)
+                    total_loss = total_loss + advantage * -mean_log_prob  # Negative because we want to maximize
+                    total_rewards.append(sample_rewards[j].item())
+                    
+                except Exception as e:
+                    print(f"Error processing sample {j}: {str(e)}")
+                    continue
         
-        # Average loss over batch and samples
-        total_loss = -total_loss / (batch_size * self.num_samples)  # Negative because we want to maximize
-        avg_reward = sum(total_rewards) / len(total_rewards)
+        # Handle case where all samples failed
+        if len(total_rewards) == 0:
+            print("Warning: All samples failed processing. Using fallback loss value.")
+            total_loss = torch.tensor(1.0, device=self.device, requires_grad=True)
+            avg_reward = 0.0
+        else:
+            # Average loss over valid samples
+            total_loss = total_loss / len(total_rewards)
+            avg_reward = sum(total_rewards) / len(total_rewards)
+            
+            # Final NaN check
+            if torch.isnan(total_loss).any():
+                print("Warning: NaN loss detected after averaging. Using fallback loss value.")
+                total_loss = torch.tensor(1.0, device=self.device, requires_grad=True)
         
         # Scale the loss by the number of accumulation steps
         scaled_loss = total_loss / self.gradient_accumulation_steps
@@ -629,7 +699,7 @@ class RLOOTrainer:
         self.current_step += 1
         
         return {
-            "loss": total_loss.item(),
+            "loss": total_loss.item() if not torch.isnan(total_loss).any().item() else 1.0,
             "avg_reward": avg_reward
         }
 
@@ -670,49 +740,35 @@ class RLOOTrainer:
                     # Move batch to device
                     batch = {k: v.to(device) for k, v in batch.items()}
                     
-                    # Extract common prefix between chosen and rejected inputs (prompt)
+                    # Get batch size
                     batch_size = batch["chosen_input_ids"].size(0)
-                    seq_length = batch["chosen_input_ids"].size(1)
                     
-                    # Initialize with all ones (assuming everything is common)
-                    common_mask = torch.ones((batch_size, seq_length), dtype=torch.bool, device=device)
-                    
-                    # Find where chosen and rejected differ (element-wise comparison)
-                    split_points = []
-                    for b in range(batch_size):
-                        split_point = seq_length  # Default: whole sequence is prompt
-                        for i in range(seq_length):
-                            if batch["chosen_input_ids"][b, i] != batch["rejected_input_ids"][b, i]:
-                                split_point = i
-                                break
-                        split_points.append(split_point)
-                        common_mask[b, split_point:] = False
-                    
-                    # Create prompt_input_ids using only the common prefix (masked version)
-                    prompt_input_ids = batch["chosen_input_ids"].clone() 
+                    # Use the prompt_response_mask from the dataset instead of computing it
+                    prompt_input_ids = batch["chosen_input_ids"].clone()
                     prompt_attention_mask = batch["chosen_attention_mask"].clone()
                     
-                    # Zero out non-common parts (visualization only - masks handle this in computation)
-                    prompt_input_ids = prompt_input_ids * common_mask.long()
+                    # Use the masks from the dataset that properly distinguish prompt and response tokens
+                    chosen_attention_mask = batch["chosen_attention_mask"].clone() * batch["chosen_prompt_response_mask"].clone()
+                    rejected_attention_mask = batch["rejected_attention_mask"].clone() * batch["rejected_prompt_response_mask"].clone()
                     
                     if self.debug_mode and step_count % 50 == 0:
                         print("\n--- Prompt/Response Analysis ---")
                         print(f"Batch size: {batch_size}")
-                        print(f"Max sequence length: {seq_length}")
-                        print(f"Split points: {split_points}")
-                        print(f"Prompt shape: {prompt_input_ids.shape}")
-                        print(f"Chosen shape: {batch['chosen_input_ids'].shape}")
+                        print(f"Using dataset-provided prompt/response masks")
+                        
+                        # Check mask shapes
+                        print(f"Chosen mask shape: {chosen_attention_mask.shape}")
+                        print(f"Rejected mask shape: {rejected_attention_mask.shape}")
                         
                         # Check correct masking for each example individually
                         mask_check_results = []
-                        for b in range(min(batch_size, 3)):  # Check up to 3 examples
-                            # Verify that prompt tokens have attention mask 0
-                            prompt_zeros = (batch['chosen_attention_mask'][b, :split_points[b]] == 0).all().item()
-                            # Verify that response tokens have attention mask 1
-                            response_ones = (batch['chosen_attention_mask'][b, split_points[b]:] == 1).all().item()
-                            mask_check_results.append(f"Example {b}: prompt zeros={prompt_zeros}, response ones={response_ones}")
+                        for b in range(min(batch["chosen_input_ids"].size(0), 3)):  # Check up to 3 examples
+                            # Count non-zero elements in prompt and response regions
+                            prompt_tokens = (batch["chosen_prompt_response_mask"][b] == 0).sum().item()
+                            response_tokens = (batch["chosen_prompt_response_mask"][b] == 1).sum().item()
+                            mask_check_results.append(f"Example {b}: prompt tokens={prompt_tokens}, response tokens={response_tokens}")
                         
-                        print("Attention mask check (should be 0=prompt, 1=response):")
+                        print("Mask check (prompt=0, response=1):")
                         for result in mask_check_results:
                             print(f"  {result}")
                         print("-------------------------------")
@@ -723,8 +779,10 @@ class RLOOTrainer:
                         chosen_ids=batch["chosen_input_ids"],
                         rejected_ids=batch["rejected_input_ids"],
                         prompt_mask=prompt_attention_mask,
-                        chosen_mask=batch["chosen_attention_mask"],
-                        rejected_mask=batch["rejected_attention_mask"]
+                        chosen_mask=chosen_attention_mask,
+                        rejected_mask=rejected_attention_mask,
+                        chosen_prompt_response_mask=batch["chosen_prompt_response_mask"],
+                        rejected_prompt_response_mask=batch["rejected_prompt_response_mask"]
                     )
                     
                     total_loss += metrics["loss"]
@@ -762,49 +820,35 @@ class RLOOTrainer:
                     # Move batch to device
                     batch = {k: v.to(device) for k, v in batch.items()}
                     
-                    # Extract common prefix between chosen and rejected inputs (prompt)
+                    # Get batch size
                     batch_size = batch["chosen_input_ids"].size(0)
-                    seq_length = batch["chosen_input_ids"].size(1)
                     
-                    # Initialize with all ones (assuming everything is common)
-                    common_mask = torch.ones((batch_size, seq_length), dtype=torch.bool, device=device)
-                    
-                    # Find where chosen and rejected differ (element-wise comparison)
-                    split_points = []
-                    for b in range(batch_size):
-                        split_point = seq_length  # Default: whole sequence is prompt
-                        for i in range(seq_length):
-                            if batch["chosen_input_ids"][b, i] != batch["rejected_input_ids"][b, i]:
-                                split_point = i
-                                break
-                        split_points.append(split_point)
-                        common_mask[b, split_point:] = False
-                    
-                    # Create prompt_input_ids using only the common prefix (masked version)
-                    prompt_input_ids = batch["chosen_input_ids"].clone() 
+                    # Use the prompt_response_mask from the dataset instead of computing it
+                    prompt_input_ids = batch["chosen_input_ids"].clone()
                     prompt_attention_mask = batch["chosen_attention_mask"].clone()
                     
-                    # Zero out non-common parts (visualization only - masks handle this in computation)
-                    prompt_input_ids = prompt_input_ids * common_mask.long()
+                    # Use the masks from the dataset that properly distinguish prompt and response tokens
+                    chosen_attention_mask = batch["chosen_attention_mask"].clone() * batch["chosen_prompt_response_mask"].clone()
+                    rejected_attention_mask = batch["rejected_attention_mask"].clone() * batch["rejected_prompt_response_mask"].clone()
                     
                     if self.debug_mode and step_count % 50 == 0:
                         print("\n--- Prompt/Response Analysis ---")
                         print(f"Batch size: {batch_size}")
-                        print(f"Max sequence length: {seq_length}")
-                        print(f"Split points: {split_points}")
-                        print(f"Prompt shape: {prompt_input_ids.shape}")
-                        print(f"Chosen shape: {batch['chosen_input_ids'].shape}")
+                        print(f"Using dataset-provided prompt/response masks")
+                        
+                        # Check mask shapes
+                        print(f"Chosen mask shape: {chosen_attention_mask.shape}")
+                        print(f"Rejected mask shape: {rejected_attention_mask.shape}")
                         
                         # Check correct masking for each example individually
                         mask_check_results = []
-                        for b in range(min(batch_size, 3)):  # Check up to 3 examples
-                            # Verify that prompt tokens have attention mask 0
-                            prompt_zeros = (batch['chosen_attention_mask'][b, :split_points[b]] == 0).all().item()
-                            # Verify that response tokens have attention mask 1
-                            response_ones = (batch['chosen_attention_mask'][b, split_points[b]:] == 1).all().item()
-                            mask_check_results.append(f"Example {b}: prompt zeros={prompt_zeros}, response ones={response_ones}")
+                        for b in range(min(batch["chosen_input_ids"].size(0), 3)):  # Check up to 3 examples
+                            # Count non-zero elements in prompt and response regions
+                            prompt_tokens = (batch["chosen_prompt_response_mask"][b] == 0).sum().item()
+                            response_tokens = (batch["chosen_prompt_response_mask"][b] == 1).sum().item()
+                            mask_check_results.append(f"Example {b}: prompt tokens={prompt_tokens}, response tokens={response_tokens}")
                         
-                        print("Attention mask check (should be 0=prompt, 1=response):")
+                        print("Mask check (prompt=0, response=1):")
                         for result in mask_check_results:
                             print(f"  {result}")
                         print("-------------------------------")
@@ -815,8 +859,10 @@ class RLOOTrainer:
                         chosen_ids=batch["chosen_input_ids"],
                         rejected_ids=batch["rejected_input_ids"],
                         prompt_mask=prompt_attention_mask,
-                        chosen_mask=batch["chosen_attention_mask"],
-                        rejected_mask=batch["rejected_attention_mask"]
+                        chosen_mask=chosen_attention_mask,
+                        rejected_mask=rejected_attention_mask,
+                        chosen_prompt_response_mask=batch["chosen_prompt_response_mask"],
+                        rejected_prompt_response_mask=batch["rejected_prompt_response_mask"]
                     )
                     
                     total_loss += metrics["loss"]

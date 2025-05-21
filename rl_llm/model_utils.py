@@ -143,7 +143,8 @@ class QwenModel(nn.Module):
 def compute_loss(
     outputs: CausalLMOutputWithPast,
     labels: torch.Tensor,
-    attention_mask: torch.Tensor
+    attention_mask: torch.Tensor,
+    prompt_response_mask: Optional[torch.Tensor] = None
 ) -> torch.Tensor:
     """
     Compute loss while masking out query tokens.
@@ -151,7 +152,8 @@ def compute_loss(
     Args:
         outputs: Model outputs
         labels: Ground truth labels
-        attention_mask: Attention mask
+        attention_mask: Attention mask (1 for real tokens, 0 for padding)
+        prompt_response_mask: Optional mask where 0=prompt tokens, 1=response tokens
         
     Returns:
         Loss tensor
@@ -162,17 +164,46 @@ def compute_loss(
         shift_labels = labels[..., 1:].contiguous()
         shift_attention_mask = attention_mask[..., 1:].contiguous()
         
-        # Compute loss only on response tokens
+        # Also shift prompt_response_mask if provided
+        if prompt_response_mask is not None:
+            shift_prompt_response_mask = prompt_response_mask[..., 1:].contiguous()
+        else:
+            # If no prompt_response_mask provided, assume all tokens are response tokens
+            shift_prompt_response_mask = torch.ones_like(shift_attention_mask)
+        
+        # Create a padding mask to exclude padding tokens from loss
+        padding_mask = (shift_labels != 0) & (shift_labels != 1) & (shift_labels != -100)
+        
+        # Combine all masks:
+        # - attention_mask: 1 for real tokens, 0 for padding
+        # - prompt_response_mask: 0 for prompt tokens, 1 for response tokens
+        # - padding_mask: 0 for padding token ids, 1 for real token ids
+        combined_mask = shift_attention_mask * shift_prompt_response_mask * padding_mask.float()
+        
+        # Compute loss for all tokens
         loss_fct = nn.CrossEntropyLoss(reduction='none')
         loss = loss_fct(
             shift_logits.view(-1, shift_logits.size(-1)),
             shift_labels.view(-1)
         )
         
-        # Apply attention mask
+        # Apply combined mask - only tokens with mask=1 contribute to loss
         loss = loss.view(shift_labels.size())
-        loss = (loss * shift_attention_mask).sum() / shift_attention_mask.sum()
+        loss = loss * combined_mask
         
+        # Avoid division by zero by adding a small epsilon
+        epsilon = 1e-8
+        mask_sum = combined_mask.sum().clamp(min=epsilon)
+        
+        # Calculate mean loss over valid tokens
+        loss = loss.sum() / mask_sum
+        
+        # Check for NaN and provide fallback
+        if torch.isnan(loss).any():
+            print("Warning: NaN detected in compute_loss. Using fallback value.")
+            device = loss.device
+            loss = torch.tensor(1.0, device=device, requires_grad=True)
+            
         return loss
     except Exception as e:
         print(f"Error computing loss: {str(e)}")

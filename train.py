@@ -95,6 +95,7 @@ def train_sft(
                     metrics = trainer.train_step(
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
+                        prompt_response_mask=batch["prompt_response_mask"],
                         labels=batch["labels"]
                     )
                     total_loss += metrics["loss"]
@@ -272,14 +273,20 @@ def train_rloo(
         model = QwenModel.from_pretrained(sft_model_path)
         tokenizer = AutoTokenizer.from_pretrained(sft_model_path)
         
-        # Initialize reward model
-        reward_model = RewardModel(model_name)
+        # Get hidden size from the underlying HuggingFace model
+        hidden_size = model.model.config.hidden_size
+        
+        # Initialize reward model with the same model name as SFT for consistency
+        reward_model = RewardModel(
+            model_name=sft_model_path,  # Use SFT model path to ensure tokenizer consistency
+            hidden_size=hidden_size  # Use the hidden size from the underlying model
+        )
         
         # Create dataset and dataloader if not provided
         if dataloader is None:
             dataset = PreferenceDataset(
                 dataset_name=dataset_name,
-                tokenizer=tokenizer,
+                tokenizer=tokenizer,  # Use the same tokenizer from SFT model
                 max_length=max_length,
                 subset_size=subset_size
             )

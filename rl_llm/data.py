@@ -35,21 +35,74 @@ class PreferenceDataset(Dataset):
                 "test": "test_prefs"
             }
             actual_split = split_map.get(split, split)
-            self.dataset = load_dataset("HuggingFaceH4/ultrafeedback_binarized", split=actual_split)
+            raw_dataset = load_dataset("HuggingFaceH4/ultrafeedback_binarized", split=actual_split)
+            
+            # Filter out examples with prompts that exceed max_length
+            filtered_indices = []
+            skipped_count = 0
+            
+            print(f"Filtering UltraFeedback dataset to remove examples with long prompts...")
+            for i, item in enumerate(raw_dataset):
+                try:
+                    # Try to estimate prompt length by tokenizing it
+                    prompt_tokens = len(tokenizer.encode(item["prompt"]))
+                    if prompt_tokens <= max_length * 0.7:  # Leave 30% space for responses
+                        filtered_indices.append(i)
+                    else:
+                        skipped_count += 1
+                except Exception as e:
+                    print(f"Error processing example {i}: {str(e)}")
+                    skipped_count += 1
+            
+            if skipped_count > 0:
+                print(f"Filtered out {skipped_count}/{len(raw_dataset)} examples with prompts exceeding {max_length * 0.7} tokens")
+            
+            # If subset_size is provided, take a subset of the filtered indices
             if subset_size is not None:
-                self.dataset = self.dataset.select(range(min(subset_size, len(self.dataset))))
+                filtered_indices = filtered_indices[:min(subset_size, len(filtered_indices))]
+                
+            self.dataset = raw_dataset.select(filtered_indices)
+            print(f"Final dataset size: {len(self.dataset)} examples")
+            
         elif dataset_name == "smoltalk":
-            self.dataset = load_dataset("HuggingFaceTB/smol-smoltalk", split=split)
+            raw_dataset = load_dataset("HuggingFaceTB/smol-smoltalk", split=split)
             
             # For SmolTalk dataset:
             # 1. Filter for length-2 conversations (1 user + 1 assistant message)
-            self.dataset = self.dataset.filter(
+            raw_dataset = raw_dataset.filter(
                 lambda x: len(x["messages"]) == 2 and 
                 x["messages"][0]["role"] == "user" and 
                 x["messages"][1]["role"] == "assistant"
             )
             
-            # 2. Calculate 95th percentile of token lengths using a sample
+            # Filter out examples with prompts that exceed max_length
+            filtered_indices = []
+            skipped_count = 0
+            
+            print(f"Filtering SmolTalk dataset to remove examples with long prompts...")
+            for i, item in enumerate(raw_dataset):
+                try:
+                    # Try to estimate prompt length by tokenizing the user message
+                    prompt_tokens = len(tokenizer.encode(item["messages"][0]["content"]))
+                    if prompt_tokens <= max_length * 0.7:  # Leave 30% space for responses
+                        filtered_indices.append(i)
+                    else:
+                        skipped_count += 1
+                except Exception as e:
+                    print(f"Error processing example {i}: {str(e)}")
+                    skipped_count += 1
+            
+            if skipped_count > 0:
+                print(f"Filtered out {skipped_count}/{len(raw_dataset)} examples with prompts exceeding {max_length * 0.7} tokens")
+            
+            # If subset_size is provided, take a subset of the filtered indices
+            if subset_size is not None:
+                filtered_indices = filtered_indices[:min(subset_size, len(filtered_indices))]
+                
+            self.dataset = raw_dataset.select(filtered_indices)
+            print(f"Final dataset size: {len(self.dataset)} examples")
+            
+            # Calculate 95th percentile of token lengths using a sample from filtered dataset
             if len(self.dataset) > 0:
                 # Use a sample of 1000 conversations for faster processing
                 sample_size = min(1000, len(self.dataset))
@@ -65,48 +118,38 @@ class PreferenceDataset(Dataset):
                 # Set max_length to 95th percentile
                 self.max_length = int(np.percentile(token_lengths, 95))
                 print(f"SmolTalk dataset: Setting max_length to 95th percentile: {self.max_length} (calculated from {sample_size} samples)")
-            
-            if subset_size is not None:
-                self.dataset = self.dataset.select(range(min(subset_size, len(self.dataset))))
         else:
             raise ValueError(f"Unknown dataset: {dataset_name}")
         
         self.dataset_name = dataset_name.lower()
 
     def _format_conversation(self, messages: List[Dict[str, str]]) -> str:
-        """Format conversation using the tokenizer's chat template if appropriate, otherwise join content as string."""
+        """Format conversation by simply joining content as string."""
         def normalize_content(content):
-            if isinstance(content, list):
+            """Ensure content is normalized to a string regardless of input type."""
+            if content is None:
+                return ""
+            elif isinstance(content, list):
                 # If list of dicts, extract their 'content' fields
                 if all(isinstance(x, dict) and 'content' in x for x in content):
                     return "\n".join(normalize_content(x['content']) for x in content)
-                # If list of strings
-                return "\n".join(str(x) for x in content)
-            elif isinstance(content, dict) and 'content' in content:
-                return normalize_content(content['content'])
+                # If list of strings or mixed types
+                return "\n".join(normalize_content(x) for x in content)
+            elif isinstance(content, dict):
+                # Handle dictionaries: if it has 'content', use that, otherwise stringify the dict
+                if 'content' in content:
+                    return normalize_content(content['content'])
+                else:
+                    # Convert dict to string if no 'content' field
+                    return str(content)
             else:
+                # For any other type, convert to string
                 return str(content)
 
-        # If messages is a list of dicts and tokenizer has a chat template, use it
-        if (
-            isinstance(messages, list)
-            and all(isinstance(m, dict) and "role" in m and "content" in m for m in messages)
-            and hasattr(self.tokenizer, 'chat_template')
-            and self.tokenizer.chat_template is not None
-        ):
-            # Ensure all content fields are strings
-            for m in messages:
-                m["content"] = normalize_content(m["content"])
-            return self.tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=False
-            )
-        else:
-            # Fallback: join content if it's a list, or use as is
-            if isinstance(messages, list):
-                return "\n".join(normalize_content(m["content"]) if isinstance(m, dict) and "content" in m else normalize_content(m) for m in messages)
-            return normalize_content(messages)
+        # Simply join content
+        if isinstance(messages, list):
+            return "\n".join(normalize_content(m.get("content", m)) if isinstance(m, dict) else normalize_content(m) for m in messages)
+        return normalize_content(messages)
 
     def _tokenize(self, text: str) -> Dict[str, torch.Tensor]:
         """Tokenize text and create attention mask."""
@@ -117,39 +160,64 @@ class PreferenceDataset(Dataset):
             truncation=True,
             return_tensors="pt"
         )
+        return encodings
+    
+    def _tokenize_with_role_masks(self, messages: List[Dict[str, str]]) -> Dict[str, torch.Tensor]:
+        """
+        Tokenize text and create masks that distinguish between prompt (user) and response (assistant).
         
-        # Create attention mask that masks out query tokens
-        if self.dataset_name == "smoltalk":
-            # For SmolTalk, mask out all but the last assistant response
-            messages = text.split(self.tokenizer.eos_token)
-            if len(messages) > 1:
-                last_assistant_response = messages[-1]
-                response_tokens = self.tokenizer.encode(
-                    last_assistant_response,
-                    add_special_tokens=False
-                )
-                # Truncate from the right (completion side)
-                if len(response_tokens) > self.max_length:
-                    response_tokens = response_tokens[-self.max_length:]
-                encodings["attention_mask"][0, :-len(response_tokens)] = 0
-        elif self.dataset_name == "ultrafeedback":
-            # For UltraFeedback, mask out the chosen response
-            split_text = text.split(self.tokenizer.eos_token)
-            if len(split_text) > 1:
-                messages = [
-                    {"role": "user", "content": split_text[0]},
-                    {"role": "assistant", "content": split_text[1]}
-                ]
-                chosen_tokens = self.tokenizer.encode(
-                    self.tokenizer.apply_chat_template(
-                        [messages[1]],
-                        tokenize=False,
-                        add_generation_prompt=False
-                    ),
-                    add_special_tokens=False
-                )
-                encodings["attention_mask"][0, :-len(chosen_tokens)] = 0
+        Args:
+            messages: List of message dictionaries with 'role' and 'content' fields
+            
+        Returns:
+            Dictionary with input_ids, attention_mask, and prompt_response_mask tensors
+            prompt_response_mask: 0 for prompt tokens (user), 1 for response tokens (assistant)
+        """
+        # First, tokenize each message separately to track token counts
+        message_tokens = []
+        for message in messages:
+            # Normalize content to ensure it's a string
+            content = message["content"]
+            if not isinstance(content, str):
+                content = self._format_conversation([{"content": content}])
+                
+            tokens = self.tokenizer.encode(content, add_special_tokens=False)
+            message_tokens.append(tokens)
         
+        # Create the full text for tokenization (as we did before)
+        full_text = self._format_conversation(messages)
+        
+        # Get the full tokenization with padding
+        encodings = self.tokenizer(
+            full_text,
+            max_length=self.max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        )
+        
+        # Create a mask where 0 = prompt tokens (user), 1 = response tokens (assistant)
+        prompt_response_mask = torch.zeros_like(encodings["input_ids"])
+        
+        # Process the tokenized result to create the role mask
+        current_pos = 0
+        for i, message in enumerate(messages):
+            token_count = len(message_tokens[i])
+            role = message["role"]
+            
+            # Mark positions for this message
+            if role == "assistant":
+                # Set 1 for assistant tokens (response)
+                end_pos = min(current_pos + token_count, self.max_length - 1)
+                prompt_response_mask[0, current_pos:end_pos] = 1
+            # For user tokens, keep as 0 (prompt)
+            
+            current_pos += token_count
+            if current_pos >= self.max_length - 1:
+                break
+        
+        # Add the mask to the encodings
+        encodings["prompt_response_mask"] = prompt_response_mask
         return encodings
 
     def __len__(self) -> int:
@@ -159,13 +227,13 @@ class PreferenceDataset(Dataset):
         item = self.dataset[idx]
         
         if self.dataset_name == "smoltalk":
-            # Format SmolTalk conversation
-            text = self._format_conversation(item["messages"])
-            encodings = self._tokenize(text)
+            # Format and tokenize SmolTalk conversation with role-based masks
+            encodings = self._tokenize_with_role_masks(item["messages"])
             
             return {
                 "input_ids": encodings["input_ids"].squeeze(),
                 "attention_mask": encodings["attention_mask"].squeeze(),
+                "prompt_response_mask": encodings["prompt_response_mask"].squeeze(),
                 "labels": encodings["input_ids"].squeeze()
             }
             
@@ -180,17 +248,17 @@ class PreferenceDataset(Dataset):
                 {"role": "assistant", "content": item["rejected"]}
             ]
             
-            chosen_text = self._format_conversation(messages_chosen)
-            rejected_text = self._format_conversation(messages_rejected)
-            
-            chosen_encodings = self._tokenize(chosen_text)
-            rejected_encodings = self._tokenize(rejected_text)
+            # Tokenize with role-based masks
+            chosen_encodings = self._tokenize_with_role_masks(messages_chosen)
+            rejected_encodings = self._tokenize_with_role_masks(messages_rejected)
             
             return {
                 "chosen_input_ids": chosen_encodings["input_ids"].squeeze(),
                 "chosen_attention_mask": chosen_encodings["attention_mask"].squeeze(),
+                "chosen_prompt_response_mask": chosen_encodings["prompt_response_mask"].squeeze(),
                 "rejected_input_ids": rejected_encodings["input_ids"].squeeze(),
-                "rejected_attention_mask": rejected_encodings["attention_mask"].squeeze()
+                "rejected_attention_mask": rejected_encodings["attention_mask"].squeeze(),
+                "rejected_prompt_response_mask": rejected_encodings["prompt_response_mask"].squeeze()
             }
 
 def create_dataloader(

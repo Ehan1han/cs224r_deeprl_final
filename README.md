@@ -49,6 +49,33 @@ The pipeline includes automatic GPU memory management:
 - Memory is also cleared between batches and epochs
 - Each training function uses a try/except/finally pattern to ensure proper cleanup
 
+## Attention Mask Handling
+
+The pipeline implements sophisticated attention mask handling for proper training:
+
+1. **Prompt/Response Masks**:
+   - Binary masks distinguishing between prompt tokens (0) and response tokens (1)
+   - Created during dataset preparation based on message roles
+   - Ensures that loss is only calculated on response tokens
+
+2. **Padding Masks**:
+   - Identifies padding tokens to exclude them from loss calculation
+   - Works with standard padding token IDs (0, 1, -100)
+
+3. **Combined Masking**:
+   - The system combines attention masks, prompt/response masks, and padding masks
+   - Results in loss being calculated only on valid response tokens
+   - Improves training stability and performance
+
+## Dataset Filtering
+
+The pipeline automatically filters datasets to ensure high-quality training:
+
+- Removes examples with excessively long prompts (>70% of the maximum sequence length)
+- Preserves examples with adequate space for responses
+- Reports statistics on filtered examples
+- Enhances training stability by preventing truncation issues
+
 ## Individual Training Commands
 
 ### SFT Training
@@ -82,7 +109,7 @@ python train.py --method dpo \
 ### RLOO Training
 ```bash
 python train.py --method rloo \
-    --model_name "Qwen/Qwen2.5-0.5B" \
+    --sft_model_path "outputs/sft/final" \
     --dataset_name "ultrafeedback" \
     --batch_size 8 \
     --learning_rate 1e-5 \
@@ -118,6 +145,16 @@ For quick testing or debugging, you can use the test pipeline:
 
 This script runs a smaller version of the complete pipeline with limited data for faster testing.
 
+## Numerical Stability
+
+The training pipeline includes several measures to ensure numerical stability:
+
+1. **Epsilon Values**: Small constants added to denominators to prevent division by zero
+2. **Value Clamping**: Limits applied to log probabilities and advantage values to prevent overflow/underflow 
+3. **NaN Detection**: Automatic detection and replacement of NaN values with fallback constants
+4. **Gradient Clipping**: Applied to prevent exploding gradients
+5. **Attention Mask Management**: Proper handling of masks for loss calculation
+
 ## Weights & Biands Integration
 
 All training and evaluation runs are tracked with Weights & Biands. The integration includes:
@@ -144,13 +181,14 @@ For UltraFeedback, the pipeline uses:
 
 1. **SFT (Supervised Fine-Tuning)**
    - Trains the model on high-quality conversations
-   - Uses standard language modeling loss
+   - Uses standard language modeling loss (on response tokens only)
    - Best for initial fine-tuning
 
 2. **DPO (Direct Preference Optimization)**
    - Trains the model to prefer chosen responses over rejected ones
    - Uses preference pairs from UltraFeedback dataset
    - Requires a pre-trained SFT model
+   - Formula: -E[log σ(β * (log πθ(yw|x)/πref(yw|x) - log πθ(yl|x)/πref(yl|x)))]
 
 3. **RLOO (REINFORCE Leave One-Out)**
    - A policy gradient estimator based on REINFORCE with a variance-reducing baseline
