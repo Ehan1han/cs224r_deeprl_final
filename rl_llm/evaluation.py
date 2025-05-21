@@ -4,13 +4,16 @@ import os
 import json
 from tqdm import tqdm
 from openai import OpenAI
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 class ModelEvaluator:
     def __init__(
         self,
         model_path: str,
         reference_model_path: str = "Qwen/Qwen2.5-0.5B-Instruct",
-        nemotron_api_key: str = "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"
+        nemotron_api_key: str = "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",
+        use_wandb: bool = False
     ):
         """
         Initialize the model evaluator using OpenAI API for Nemotron reward scoring.
@@ -19,16 +22,33 @@ class ModelEvaluator:
             model_path: Path to the trained model
             reference_model_path: Path to the reference model
             nemotron_api_key: API key for Nemotron reward model
+            use_wandb: Whether to log to wandb during evaluation
         """
         self.model_path = model_path
         self.reference_model_path = reference_model_path
         self.api_key = nemotron_api_key
+        self.use_wandb = use_wandb
         
         # Initialize Nemotron client using the exact format from the documentation
         self.nemotron_client = OpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=nemotron_api_key
         )
+        
+        # Initialize both models only once
+        print(f"Loading model: {model_path}")
+        self.model, self.model_tokenizer = self._load_model(model_path)
+        
+        print(f"Loading reference model: {reference_model_path}")
+        self.ref_model, self.ref_tokenizer = self._load_model(reference_model_path)
+    
+    def _load_model(self, model_path):
+        """Helper function to load model and tokenizer"""
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        model = AutoModelForCausalLM.from_pretrained(model_path)
+        if torch.cuda.is_available():
+            model = model.to("cuda")
+        return model, tokenizer
     
     def get_reward_score(self, prompt: str, response: str) -> float:
         """
@@ -65,30 +85,22 @@ class ModelEvaluator:
             print(f"Error getting reward score: {str(e)}")
             return 0.0
     
-    def generate_response(self, prompt: str, model) -> str:
+    def generate_response(self, prompt: str, use_model=True) -> str:
         """
         Generate a response from a model for the given prompt.
-        This uses a non-API method since we want to evaluate our local trained models.
+        Uses pre-loaded models instead of loading for each prompt.
         
         Args:
             prompt: The input prompt
-            model: The model to use for generation
+            use_model: If True, use self.model, otherwise use self.ref_model
             
         Returns:
             Generated response text
         """
-        # Import here to avoid dependency issues if not using this method
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        
         try:
-            # Load model and tokenizer
-            if isinstance(model, str):
-                print(f"Loading model: {model}")
-                tokenizer = AutoTokenizer.from_pretrained(model)
-                model = AutoModelForCausalLM.from_pretrained(model)
-                if torch.cuda.is_available():
-                    model = model.to("cuda")
+            # Select the appropriate model and tokenizer
+            model = self.model if use_model else self.ref_model
+            tokenizer = self.model_tokenizer if use_model else self.ref_tokenizer
             
             # Tokenize input
             inputs = tokenizer(prompt, return_tensors="pt")
@@ -134,12 +146,13 @@ class ModelEvaluator:
         wins = 0
         model_rewards = []
         ref_rewards = []
+        prompt_results = []
         
         print(f"Evaluating {len(eval_prompts)} prompts...")
         for i, prompt in enumerate(tqdm(eval_prompts)):
             # Generate responses from both models
-            model_response = self.generate_response(prompt, self.model_path)
-            ref_response = self.generate_response(prompt, self.reference_model_path)
+            model_response = self.generate_response(prompt, use_model=True)
+            ref_response = self.generate_response(prompt, use_model=False)
             
             # Get reward scores using OpenAI API (Nemotron)
             model_reward = self.get_reward_score(prompt, model_response)
@@ -150,8 +163,42 @@ class ModelEvaluator:
             ref_rewards.append(ref_reward)
             
             # Count win
-            if model_reward > ref_reward:
+            is_win = model_reward > ref_reward
+            if is_win:
                 wins += 1
+            
+            # Store result for this prompt
+            prompt_result = {
+                "prompt": prompt,
+                "model_response": model_response,
+                "ref_response": ref_response,
+                "model_reward": model_reward,
+                "ref_reward": ref_reward,
+                "win": is_win
+            }
+            prompt_results.append(prompt_result)
+            
+            # Log real-time metrics to wandb
+            if self.use_wandb:
+                try:
+                    import wandb
+                    current_win_rate = wins / (i + 1)
+                    current_avg_model_reward = np.mean(model_rewards)
+                    current_avg_ref_reward = np.mean(ref_rewards)
+                    current_reward_improvement = current_avg_model_reward - current_avg_ref_reward
+                    
+                    wandb.log({
+                        "current_win_rate": current_win_rate,
+                        "current_avg_model_reward": current_avg_model_reward,
+                        "current_avg_ref_reward": current_avg_ref_reward,
+                        "current_reward_improvement": current_reward_improvement,
+                        "examples_evaluated": i + 1,
+                        "last_model_reward": model_reward,
+                        "last_ref_reward": ref_reward,
+                        "last_win": is_win
+                    })
+                except Exception as e:
+                    print(f"Error logging to wandb: {str(e)}")
             
             # Progress logging
             if (i + 1) % 5 == 0 or i == 0:
@@ -171,7 +218,10 @@ class ModelEvaluator:
             "win_rate": win_rate,
             "avg_model_reward": avg_model_reward,
             "avg_ref_reward": avg_ref_reward,
-            "reward_improvement": reward_improvement
+            "reward_improvement": reward_improvement,
+            "model_rewards": model_rewards,
+            "ref_rewards": ref_rewards,
+            "prompt_results": prompt_results
         }
 
 def load_eval_prompts(
@@ -201,19 +251,23 @@ def load_eval_prompts(
     return prompts
 
 def run_evaluation(
-    model_path: str,
+    model,  # Can be either a model instance or path string
     nemotron_api_key: str = "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",
     num_prompts: int = 100,
-    output_dir: Optional[str] = None
+    output_dir: Optional[str] = None,
+    use_wandb: bool = False,
+    model_path: Optional[str] = None
 ) -> Dict[str, float]:
     """
     Run full evaluation pipeline.
     
     Args:
-        model_path: Path to the trained model
+        model: Either a model instance or path to the trained model
         nemotron_api_key: API key for Nemotron reward model (default provided)
         num_prompts: Number of prompts to evaluate
         output_dir: Directory to save evaluation results
+        use_wandb: Whether to log to wandb during evaluation
+        model_path: Path to model (required if model is an instance)
         
     Returns:
         Dictionary containing evaluation metrics
@@ -222,10 +276,21 @@ def run_evaluation(
     print(f"Loading {num_prompts} evaluation prompts...")
     eval_prompts = load_eval_prompts(split="test_prefs", num_prompts=num_prompts)
     
+    # If model is a string (path), use it directly
+    if isinstance(model, str):
+        model_path = model
+        model_instance = None
+    else:
+        # Otherwise use the provided model instance
+        model_instance = model
+        if model_path is None:
+            raise ValueError("model_path must be provided when passing a model instance")
+    
     # Initialize evaluator with OpenAI API
     evaluator = ModelEvaluator(
         model_path=model_path,
-        nemotron_api_key=nemotron_api_key
+        nemotron_api_key=nemotron_api_key,
+        use_wandb=use_wandb
     )
     
     # Run evaluation
@@ -243,7 +308,21 @@ def run_evaluation(
     # Save results
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
+        
+        # Save basic metrics
+        basic_metrics = {
+            "win_rate": metrics["win_rate"],
+            "avg_model_reward": metrics["avg_model_reward"],
+            "avg_ref_reward": metrics["avg_ref_reward"],
+            "reward_improvement": metrics["reward_improvement"]
+        }
         with open(os.path.join(output_dir, "evaluation_metrics.json"), "w") as f:
-            json.dump(metrics, f, indent=2)
+            json.dump(basic_metrics, f, indent=2)
+        
+        # Save detailed results (optional)
+        if "prompt_results" in metrics and len(metrics["prompt_results"]) > 0:
+            with open(os.path.join(output_dir, "detailed_results.json"), "w") as f:
+                # Save only the first 10 detailed results to avoid huge files
+                json.dump(metrics["prompt_results"][:10], f, indent=2)
     
     return metrics 

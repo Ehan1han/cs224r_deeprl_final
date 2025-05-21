@@ -201,9 +201,11 @@ def train_dpo(
         trainer = DPOTrainer(
             model=model,
             ref_model=ref_model,
-            beta=0.2,
-            learning_rate=2e-6,
-            gradient_accumulation_steps=gradient_accumulation_steps
+            beta=0.1,  # Using 0.1 (reduced from 0.2) as in objectives.py
+            learning_rate=learning_rate,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            use_wandb=use_wandb,
+            debug_mode=True  # Always enable debug mode for better diagnostics
         )
         
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -211,10 +213,10 @@ def train_dpo(
         # Train the model
         if max_steps is not None and max_steps > 0:
             # If max_steps is provided, use it instead of epochs
-            trainer.train(max_steps=max_steps)
+            trainer.train(dataloader=dataloader, max_steps=max_steps)
         else:
             # Otherwise use epochs as before
-            trainer.train()
+            trainer.train(dataloader=dataloader, num_epochs=num_epochs)
         
         # Save final model
         model.save_pretrained(os.path.join(output_dir, "final"))
@@ -293,7 +295,9 @@ def train_rloo(
             reward_model=reward_model,
             learning_rate=learning_rate,
             num_samples=4,  # Number of samples for RLOO
-            gradient_accumulation_steps=gradient_accumulation_steps
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            use_wandb=use_wandb,
+            debug_mode=True  # Always enable debug mode for better diagnostics
         )
         
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -301,10 +305,10 @@ def train_rloo(
         # Train the model
         if max_steps is not None and max_steps > 0:
             # If max_steps is provided, use it instead of epochs
-            trainer.train(max_steps=max_steps)
+            trainer.train(dataloader=dataloader, max_steps=max_steps)
         else:
             # Otherwise use epochs as before
-            trainer.train()
+            trainer.train(dataloader=dataloader, num_epochs=num_epochs)
         
         # Save final model
         model.save_pretrained(os.path.join(output_dir, "final"))

@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .model_utils import QwenModel, compute_loss
+import wandb
 
 class SFTTrainer:
     def __init__(
@@ -83,10 +84,12 @@ class DPOTrainer:
         self,
         model: QwenModel,
         ref_model: QwenModel,
-        beta: float = 0.2,
+        beta: float = 0.1,  # Reduced from 0.2 to 0.1 to make updates more gentle
         learning_rate: float = 1e-5,
-        max_grad_norm: float = 1.0,
-        gradient_accumulation_steps: int = 4
+        max_grad_norm: float = 0.5,  # Reduced from 1.0 to 0.5 for more stability
+        gradient_accumulation_steps: int = 4,
+        use_wandb: bool = True,
+        debug_mode: bool = True  # Added debug mode for additional diagnostics
     ):
         """
         Initialize DPO trainer.
@@ -94,19 +97,28 @@ class DPOTrainer:
         Args:
             model: Policy model to train
             ref_model: Reference model (typically SFT model)
-            beta: Temperature parameter for DPO
+            beta: Temperature parameter for DPO (lower values = more conservative updates)
             learning_rate: Learning rate for optimizer
             max_grad_norm: Maximum gradient norm for clipping
             gradient_accumulation_steps: Number of steps to accumulate gradients
+            use_wandb: Whether to use wandb for logging
+            debug_mode: Whether to log additional debugging information
         """
         self.model = model
         self.ref_model = ref_model
+        
+        # Freeze reference model
+        for param in self.ref_model.parameters():
+            param.requires_grad = False
+        
         self.beta = beta
         self.max_grad_norm = max_grad_norm
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
         self.device = next(model.parameters()).device
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.current_step = 0
+        self.use_wandb = use_wandb
+        self.debug_mode = debug_mode
         
     def train_step(
         self,
@@ -129,7 +141,7 @@ class DPOTrainer:
             rejected_mask: Rejected response attention mask
             
         Returns:
-            Dictionary containing loss value
+            Dictionary containing loss value and metrics
         """
         self.model.train()
         self.ref_model.eval()
@@ -220,15 +232,251 @@ class DPOTrainer:
         # Only perform optimization step after accumulating gradients
         if (self.current_step + 1) % self.gradient_accumulation_steps == 0:
             # Clip gradients
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             self.optimizer.step()
+            
+            # Log gradient norm if using wandb
+            if self.use_wandb:
+                wandb.log({"grad_norm": grad_norm.item()}, step=self.current_step)
         
         self.current_step += 1
         
-        return {
+        metrics = {
             "loss": loss.item(),
             "chosen_ratio": chosen_ratio.mean().item(),
-            "rejected_ratio": rejected_ratio.mean().item()
+            "rejected_ratio": rejected_ratio.mean().item(),
+            "chosen_log_probs": chosen_log_probs.mean().item(),
+            "rejected_log_probs": rejected_log_probs.mean().item(),
+            "chosen_ref_log_probs": chosen_ref_log_probs.mean().item(),
+            "rejected_ref_log_probs": rejected_ref_log_probs.mean().item()
+        }
+        
+        # Log metrics to wandb if enabled
+        if self.use_wandb:
+            wandb.log(metrics, step=self.current_step)
+            
+        return metrics
+
+    def train(self, dataloader=None, num_epochs=1, max_steps=None):
+        """
+        Train the model on the provided dataloader.
+        
+        Args:
+            dataloader: DataLoader containing training data
+            num_epochs: Number of epochs to train for
+            max_steps: Maximum number of steps to train for (overrides num_epochs if provided)
+        
+        Returns:
+            Dictionary containing training metrics
+        """
+        if dataloader is None:
+            raise ValueError("dataloader must be provided")
+        
+        self.model.train()
+        self.ref_model.eval()
+        
+        device = next(self.model.parameters()).device
+        step_count = 0
+        total_loss = 0
+        total_chosen_ratio = 0
+        total_rejected_ratio = 0
+        total_steps = 0
+        
+        # Training loop
+        from tqdm import tqdm
+        
+        if max_steps is not None:
+            # If max_steps is provided, loop until reaching that many steps
+            progress_bar = tqdm(total=max_steps, desc="Training")
+            # Calculate true epoch based on steps and dataset size
+            steps_per_epoch = len(dataloader)
+            while step_count < max_steps:
+                for batch in dataloader:
+                    # Move batch to device
+                    batch = {k: v.to(device) for k, v in batch.items()}
+                    
+                    # Extract common prefix between chosen and rejected inputs (prompt)
+                    batch_size = batch["chosen_input_ids"].size(0)
+                    seq_length = batch["chosen_input_ids"].size(1)
+                    
+                    # Initialize with all ones (assuming everything is common)
+                    common_mask = torch.ones((batch_size, seq_length), dtype=torch.bool, device=device)
+                    
+                    # Find where chosen and rejected differ (element-wise comparison)
+                    split_points = []
+                    for b in range(batch_size):
+                        split_point = seq_length  # Default: whole sequence is prompt
+                        for i in range(seq_length):
+                            if batch["chosen_input_ids"][b, i] != batch["rejected_input_ids"][b, i]:
+                                split_point = i
+                                break
+                        split_points.append(split_point)
+                        common_mask[b, split_point:] = False
+                    
+                    # Create prompt_input_ids using only the common prefix (masked version)
+                    prompt_input_ids = batch["chosen_input_ids"].clone() 
+                    prompt_attention_mask = batch["chosen_attention_mask"].clone()
+                    
+                    # Zero out non-common parts (visualization only - masks handle this in computation)
+                    prompt_input_ids = prompt_input_ids * common_mask.long()
+                    
+                    if self.debug_mode and step_count % 50 == 0:
+                        print("\n--- Prompt/Response Analysis ---")
+                        print(f"Batch size: {batch_size}")
+                        print(f"Max sequence length: {seq_length}")
+                        print(f"Split points: {split_points}")
+                        print(f"Prompt shape: {prompt_input_ids.shape}")
+                        print(f"Chosen shape: {batch['chosen_input_ids'].shape}")
+                        
+                        # Check correct masking for each example individually
+                        mask_check_results = []
+                        for b in range(min(batch_size, 3)):  # Check up to 3 examples
+                            # Verify that prompt tokens have attention mask 0
+                            prompt_zeros = (batch['chosen_attention_mask'][b, :split_points[b]] == 0).all().item()
+                            # Verify that response tokens have attention mask 1
+                            response_ones = (batch['chosen_attention_mask'][b, split_points[b]:] == 1).all().item()
+                            mask_check_results.append(f"Example {b}: prompt zeros={prompt_zeros}, response ones={response_ones}")
+                        
+                        print("Attention mask check (should be 0=prompt, 1=response):")
+                        for result in mask_check_results:
+                            print(f"  {result}")
+                        print("-------------------------------")
+                    
+                    # Forward and backward pass
+                    metrics = self.train_step(
+                        prompt_ids=prompt_input_ids,
+                        chosen_ids=batch["chosen_input_ids"],
+                        rejected_ids=batch["rejected_input_ids"],
+                        prompt_mask=prompt_attention_mask,
+                        chosen_mask=batch["chosen_attention_mask"],
+                        rejected_mask=batch["rejected_attention_mask"]
+                    )
+                    
+                    total_loss += metrics["loss"]
+                    total_chosen_ratio += metrics.get("chosen_ratio", 0)
+                    total_rejected_ratio += metrics.get("rejected_ratio", 0)
+                    total_steps += 1
+                    step_count += 1
+                    
+                    progress_bar.update(1)
+                    progress_bar.set_postfix({
+                        "loss": metrics["loss"],
+                        "chosen_ratio": metrics.get("chosen_ratio", 0),
+                        "rejected_ratio": metrics.get("rejected_ratio", 0)
+                    })
+                    
+                    # Log epoch-level metrics if using wandb
+                    if self.use_wandb:
+                        # Calculate current epoch as a float to show partial progress
+                        current_epoch = step_count / steps_per_epoch
+                        wandb.log({
+                            "epoch": current_epoch,
+                            "epoch_avg_loss": total_loss / total_steps,
+                            "epoch_avg_chosen_ratio": total_chosen_ratio / total_steps,
+                            "epoch_avg_rejected_ratio": total_rejected_ratio / total_steps,
+                            "learning_rate": self.optimizer.param_groups[0]["lr"]
+                        }, step=self.current_step)
+                    
+                    if step_count >= max_steps:
+                        break
+                
+        else:
+            # Train for a fixed number of epochs
+            for epoch in range(num_epochs):
+                progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
+                epoch_loss = 0
+                epoch_steps = 0
+                
+                for batch in progress_bar:
+                    # Move batch to device
+                    batch = {k: v.to(device) for k, v in batch.items()}
+                    
+                    # Extract common prefix between chosen and rejected inputs (prompt)
+                    batch_size = batch["chosen_input_ids"].size(0)
+                    seq_length = batch["chosen_input_ids"].size(1)
+                    
+                    # Initialize with all ones (assuming everything is common)
+                    common_mask = torch.ones((batch_size, seq_length), dtype=torch.bool, device=device)
+                    
+                    # Find where chosen and rejected differ (element-wise comparison)
+                    split_points = []
+                    for b in range(batch_size):
+                        split_point = seq_length  # Default: whole sequence is prompt
+                        for i in range(seq_length):
+                            if batch["chosen_input_ids"][b, i] != batch["rejected_input_ids"][b, i]:
+                                split_point = i
+                                break
+                        split_points.append(split_point)
+                        common_mask[b, split_point:] = False
+                    
+                    # Create prompt_input_ids using only the common prefix (masked version)
+                    prompt_input_ids = batch["chosen_input_ids"].clone() 
+                    prompt_attention_mask = batch["chosen_attention_mask"].clone()
+                    
+                    # Zero out non-common parts (visualization only - masks handle this in computation)
+                    prompt_input_ids = prompt_input_ids * common_mask.long()
+                    
+                    if self.debug_mode and step_count % 50 == 0:
+                        print("\n--- Prompt/Response Analysis ---")
+                        print(f"Batch size: {batch_size}")
+                        print(f"Max sequence length: {seq_length}")
+                        print(f"Split points: {split_points}")
+                        print(f"Prompt shape: {prompt_input_ids.shape}")
+                        print(f"Chosen shape: {batch['chosen_input_ids'].shape}")
+                        
+                        # Check correct masking for each example individually
+                        mask_check_results = []
+                        for b in range(min(batch_size, 3)):  # Check up to 3 examples
+                            # Verify that prompt tokens have attention mask 0
+                            prompt_zeros = (batch['chosen_attention_mask'][b, :split_points[b]] == 0).all().item()
+                            # Verify that response tokens have attention mask 1
+                            response_ones = (batch['chosen_attention_mask'][b, split_points[b]:] == 1).all().item()
+                            mask_check_results.append(f"Example {b}: prompt zeros={prompt_zeros}, response ones={response_ones}")
+                        
+                        print("Attention mask check (should be 0=prompt, 1=response):")
+                        for result in mask_check_results:
+                            print(f"  {result}")
+                        print("-------------------------------")
+                    
+                    # Forward and backward pass
+                    metrics = self.train_step(
+                        prompt_ids=prompt_input_ids,
+                        chosen_ids=batch["chosen_input_ids"],
+                        rejected_ids=batch["rejected_input_ids"],
+                        prompt_mask=prompt_attention_mask,
+                        chosen_mask=batch["chosen_attention_mask"],
+                        rejected_mask=batch["rejected_attention_mask"]
+                    )
+                    
+                    total_loss += metrics["loss"]
+                    total_chosen_ratio += metrics.get("chosen_ratio", 0)
+                    total_rejected_ratio += metrics.get("rejected_ratio", 0)
+                    total_steps += 1
+                    step_count += 1
+                    epoch_loss += metrics["loss"]
+                    epoch_steps += 1
+                    
+                    progress_bar.set_postfix({
+                        "loss": metrics["loss"],
+                        "chosen_ratio": metrics.get("chosen_ratio", 0),
+                        "rejected_ratio": metrics.get("rejected_ratio", 0)
+                    })
+                
+                # Log epoch-level metrics if using wandb
+                if self.use_wandb:
+                    wandb.log({
+                        "epoch": epoch,
+                        "epoch_avg_loss": epoch_loss / epoch_steps,
+                        "epoch_avg_chosen_ratio": total_chosen_ratio / total_steps,
+                        "epoch_avg_rejected_ratio": total_rejected_ratio / total_steps,
+                        "learning_rate": self.optimizer.param_groups[0]["lr"]
+                    }, step=self.current_step)
+        
+        # Return average metrics
+        return {
+            "loss": total_loss / total_steps,
+            "chosen_ratio": total_chosen_ratio / total_steps,
+            "rejected_ratio": total_rejected_ratio / total_steps
         }
 
 class RLOOTrainer:
@@ -238,8 +486,10 @@ class RLOOTrainer:
         reward_model: nn.Module,
         learning_rate: float = 1e-5,
         num_samples: int = 4,
-        max_grad_norm: float = 1.0,
-        gradient_accumulation_steps: int = 4
+        max_grad_norm: float = 0.5,  # Reduced from 1.0 to 0.5 for more stability
+        gradient_accumulation_steps: int = 4,
+        use_wandb: bool = True,
+        debug_mode: bool = True  # Added debug mode for additional diagnostics
     ):
         """
         Initialize RLOO trainer.
@@ -251,15 +501,24 @@ class RLOOTrainer:
             num_samples: Number of samples for RLOO (k in the formula)
             max_grad_norm: Maximum gradient norm for clipping
             gradient_accumulation_steps: Number of steps to accumulate gradients
+            use_wandb: Whether to use wandb for logging
+            debug_mode: Whether to log additional debugging information
         """
         self.model = model
         self.reward_model = reward_model
+        
+        # Freeze reward model parameters
+        for param in self.reward_model.parameters():
+            param.requires_grad = False
+            
         self.num_samples = num_samples
         self.max_grad_norm = max_grad_norm
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
         self.device = next(model.parameters()).device
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.current_step = 0
+        self.use_wandb = use_wandb
+        self.debug_mode = debug_mode
         
     def train_step(
         self,
@@ -372,4 +631,206 @@ class RLOOTrainer:
         return {
             "loss": total_loss.item(),
             "avg_reward": avg_reward
+        }
+
+    def train(self, dataloader=None, num_epochs=1, max_steps=None):
+        """
+        Train the model on the provided dataloader.
+        
+        Args:
+            dataloader: DataLoader containing training data
+            num_epochs: Number of epochs to train for
+            max_steps: Maximum number of steps to train for (overrides num_epochs if provided)
+        
+        Returns:
+            Dictionary containing training metrics
+        """
+        if dataloader is None:
+            raise ValueError("dataloader must be provided")
+        
+        self.model.train()
+        self.reward_model.eval()
+        
+        device = next(self.model.parameters()).device
+        step_count = 0
+        total_loss = 0
+        total_reward = 0
+        total_steps = 0
+        
+        # Training loop
+        from tqdm import tqdm
+        
+        if max_steps is not None:
+            # If max_steps is provided, loop until reaching that many steps
+            progress_bar = tqdm(total=max_steps, desc="Training")
+            # Calculate true epoch based on steps and dataset size
+            steps_per_epoch = len(dataloader)
+            while step_count < max_steps:
+                for batch in dataloader:
+                    # Move batch to device
+                    batch = {k: v.to(device) for k, v in batch.items()}
+                    
+                    # Extract common prefix between chosen and rejected inputs (prompt)
+                    batch_size = batch["chosen_input_ids"].size(0)
+                    seq_length = batch["chosen_input_ids"].size(1)
+                    
+                    # Initialize with all ones (assuming everything is common)
+                    common_mask = torch.ones((batch_size, seq_length), dtype=torch.bool, device=device)
+                    
+                    # Find where chosen and rejected differ (element-wise comparison)
+                    split_points = []
+                    for b in range(batch_size):
+                        split_point = seq_length  # Default: whole sequence is prompt
+                        for i in range(seq_length):
+                            if batch["chosen_input_ids"][b, i] != batch["rejected_input_ids"][b, i]:
+                                split_point = i
+                                break
+                        split_points.append(split_point)
+                        common_mask[b, split_point:] = False
+                    
+                    # Create prompt_input_ids using only the common prefix (masked version)
+                    prompt_input_ids = batch["chosen_input_ids"].clone() 
+                    prompt_attention_mask = batch["chosen_attention_mask"].clone()
+                    
+                    # Zero out non-common parts (visualization only - masks handle this in computation)
+                    prompt_input_ids = prompt_input_ids * common_mask.long()
+                    
+                    if self.debug_mode and step_count % 50 == 0:
+                        print("\n--- Prompt/Response Analysis ---")
+                        print(f"Batch size: {batch_size}")
+                        print(f"Max sequence length: {seq_length}")
+                        print(f"Split points: {split_points}")
+                        print(f"Prompt shape: {prompt_input_ids.shape}")
+                        print(f"Chosen shape: {batch['chosen_input_ids'].shape}")
+                        
+                        # Check correct masking for each example individually
+                        mask_check_results = []
+                        for b in range(min(batch_size, 3)):  # Check up to 3 examples
+                            # Verify that prompt tokens have attention mask 0
+                            prompt_zeros = (batch['chosen_attention_mask'][b, :split_points[b]] == 0).all().item()
+                            # Verify that response tokens have attention mask 1
+                            response_ones = (batch['chosen_attention_mask'][b, split_points[b]:] == 1).all().item()
+                            mask_check_results.append(f"Example {b}: prompt zeros={prompt_zeros}, response ones={response_ones}")
+                        
+                        print("Attention mask check (should be 0=prompt, 1=response):")
+                        for result in mask_check_results:
+                            print(f"  {result}")
+                        print("-------------------------------")
+                    
+                    # Forward and backward pass
+                    metrics = self.train_step(
+                        prompt_ids=prompt_input_ids,
+                        chosen_ids=batch["chosen_input_ids"],
+                        rejected_ids=batch["rejected_input_ids"],
+                        prompt_mask=prompt_attention_mask,
+                        chosen_mask=batch["chosen_attention_mask"],
+                        rejected_mask=batch["rejected_attention_mask"]
+                    )
+                    
+                    total_loss += metrics["loss"]
+                    total_reward += metrics.get("avg_reward", 0)
+                    total_steps += 1
+                    step_count += 1
+                    
+                    progress_bar.update(1)
+                    progress_bar.set_postfix({
+                        "loss": metrics["loss"],
+                        "avg_reward": metrics.get("avg_reward", 0)
+                    })
+                    
+                    # Log epoch-level metrics if using wandb
+                    if self.use_wandb:
+                        # Calculate current epoch as a float to show partial progress
+                        current_epoch = step_count / steps_per_epoch
+                        wandb.log({
+                            "epoch": current_epoch,
+                            "epoch_avg_loss": total_loss / total_steps,
+                            "epoch_avg_chosen_ratio": total_reward / total_steps,
+                            "epoch_avg_rejected_ratio": total_reward / total_steps,
+                            "learning_rate": self.optimizer.param_groups[0]["lr"]
+                        }, step=self.current_step)
+                    
+                    if step_count >= max_steps:
+                        break
+                
+        else:
+            # Train for a fixed number of epochs
+            for epoch in range(num_epochs):
+                progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
+                
+                for batch in progress_bar:
+                    # Move batch to device
+                    batch = {k: v.to(device) for k, v in batch.items()}
+                    
+                    # Extract common prefix between chosen and rejected inputs (prompt)
+                    batch_size = batch["chosen_input_ids"].size(0)
+                    seq_length = batch["chosen_input_ids"].size(1)
+                    
+                    # Initialize with all ones (assuming everything is common)
+                    common_mask = torch.ones((batch_size, seq_length), dtype=torch.bool, device=device)
+                    
+                    # Find where chosen and rejected differ (element-wise comparison)
+                    split_points = []
+                    for b in range(batch_size):
+                        split_point = seq_length  # Default: whole sequence is prompt
+                        for i in range(seq_length):
+                            if batch["chosen_input_ids"][b, i] != batch["rejected_input_ids"][b, i]:
+                                split_point = i
+                                break
+                        split_points.append(split_point)
+                        common_mask[b, split_point:] = False
+                    
+                    # Create prompt_input_ids using only the common prefix (masked version)
+                    prompt_input_ids = batch["chosen_input_ids"].clone() 
+                    prompt_attention_mask = batch["chosen_attention_mask"].clone()
+                    
+                    # Zero out non-common parts (visualization only - masks handle this in computation)
+                    prompt_input_ids = prompt_input_ids * common_mask.long()
+                    
+                    if self.debug_mode and step_count % 50 == 0:
+                        print("\n--- Prompt/Response Analysis ---")
+                        print(f"Batch size: {batch_size}")
+                        print(f"Max sequence length: {seq_length}")
+                        print(f"Split points: {split_points}")
+                        print(f"Prompt shape: {prompt_input_ids.shape}")
+                        print(f"Chosen shape: {batch['chosen_input_ids'].shape}")
+                        
+                        # Check correct masking for each example individually
+                        mask_check_results = []
+                        for b in range(min(batch_size, 3)):  # Check up to 3 examples
+                            # Verify that prompt tokens have attention mask 0
+                            prompt_zeros = (batch['chosen_attention_mask'][b, :split_points[b]] == 0).all().item()
+                            # Verify that response tokens have attention mask 1
+                            response_ones = (batch['chosen_attention_mask'][b, split_points[b]:] == 1).all().item()
+                            mask_check_results.append(f"Example {b}: prompt zeros={prompt_zeros}, response ones={response_ones}")
+                        
+                        print("Attention mask check (should be 0=prompt, 1=response):")
+                        for result in mask_check_results:
+                            print(f"  {result}")
+                        print("-------------------------------")
+                    
+                    # Forward and backward pass
+                    metrics = self.train_step(
+                        prompt_ids=prompt_input_ids,
+                        chosen_ids=batch["chosen_input_ids"],
+                        rejected_ids=batch["rejected_input_ids"],
+                        prompt_mask=prompt_attention_mask,
+                        chosen_mask=batch["chosen_attention_mask"],
+                        rejected_mask=batch["rejected_attention_mask"]
+                    )
+                    
+                    total_loss += metrics["loss"]
+                    total_reward += metrics.get("avg_reward", 0)
+                    total_steps += 1
+                    step_count += 1
+                    
+                    progress_bar.set_postfix({
+                        "loss": metrics["loss"],
+                        "avg_reward": metrics.get("avg_reward", 0)
+                    })
+        
+        # Return average metrics
+        return {
+            "loss": total_loss / total_steps,
+            "avg_reward": total_reward / total_steps
         }
