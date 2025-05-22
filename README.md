@@ -4,6 +4,29 @@ This repository contains a training pipeline for fine-tuning language models usi
 
 ## Setup
 
+### Automated Setup (Recommended)
+
+Run the automated setup script to install miniconda and set up the environment:
+
+```bash
+# Make the setup script executable
+chmod +x setup_environment.sh
+
+# Run the setup script
+./setup_environment.sh
+```
+
+This script will:
+- Install miniconda if it's not already installed
+- Create a conda environment named `rl_llm` with Python 3.10
+- Install PyTorch with CUDA support
+- Install all other dependencies from `requirements.txt`
+- Create directories for saving reward models
+
+### Manual Setup
+
+Alternatively, you can set up the environment manually:
+
 1. Create a conda environment:
 ```bash
 conda create -n rl_llm python=3.10
@@ -40,6 +63,27 @@ The full pipeline will run in sequence and can take several hours to complete. C
 ```bash
 tmux new-session -d -s rl_llm_training './run_all.sh'
 tmux attach-session -t rl_llm_training  # To monitor progress
+```
+
+## Training Reward Models Separately
+
+For RLOO training, it's recommended to pre-train reward models separately:
+
+```bash
+# Make the script executable
+chmod +x train_reward_model.sh
+
+# Run the reward model training
+./train_reward_model.sh
+```
+
+This trains two reward models:
+- `outputs/reward_model_full`: Trained on the full UltraFeedback dataset
+- `outputs/reward_model_100`: Trained on a 100-example subset for quick testing
+
+You can then use these pre-trained reward models for RLOO training by adding these parameters:
+```bash
+--reward_model_path "outputs/reward_model_full" --no_train_reward_model
 ```
 
 ## Memory Management
@@ -88,7 +132,24 @@ python train.py --method rloo \
     --learning_rate 1e-5 \
     --num_epochs 3 \
     --max_length 512 \
+    --sft_model_path "outputs/sft/final" \
     --output_dir "outputs/rloo" \
+    --use_wandb
+```
+
+### RLOO Training with Pre-trained Reward Model
+```bash
+python train.py --method rloo \
+    --model_name "Qwen/Qwen2.5-0.5B" \
+    --dataset_name "ultrafeedback" \
+    --batch_size 8 \
+    --learning_rate 1e-5 \
+    --num_epochs 3 \
+    --max_length 512 \
+    --sft_model_path "outputs/sft/final" \
+    --output_dir "outputs/rloo" \
+    --reward_model_path "outputs/reward_model_full" \
+    --no_train_reward_model \
     --use_wandb
 ```
 
@@ -171,3 +232,11 @@ The Nemotron reward model evaluation provides the following metrics:
 - **Reward improvement**: Difference between trained and reference rewards
 
 The reward model uses the Bradley-Terry preference model to score responses, with higher scores indicating better quality.
+
+## Troubleshooting
+
+If you encounter GPU memory issues:
+- Reduce batch size
+- Increase gradient accumulation steps
+- Use a smaller subset of data (with `--subset_size`)
+- Ensure you're clearing GPU memory between training phases

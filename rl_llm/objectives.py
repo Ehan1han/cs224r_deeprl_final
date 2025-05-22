@@ -496,7 +496,7 @@ class RLOOTrainer:
         
         Args:
             model: Policy model to train
-            reward_model: Reward model for computing rewards
+            reward_model: Reward model for computing rewards (LoRA-adapted)
             learning_rate: Learning rate for optimizer
             num_samples: Number of samples for RLOO (k in the formula)
             max_grad_norm: Maximum gradient norm for clipping
@@ -507,9 +507,8 @@ class RLOOTrainer:
         self.model = model
         self.reward_model = reward_model
         
-        # Freeze reward model parameters
-        for param in self.reward_model.parameters():
-            param.requires_grad = False
+        # Ensure reward model is in evaluation mode
+        self.reward_model.eval()
             
         self.num_samples = num_samples
         self.max_grad_norm = max_grad_norm

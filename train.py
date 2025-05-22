@@ -244,7 +244,11 @@ def train_rloo(
     dataloader: Optional[DataLoader] = None,
     gradient_accumulation_steps: int = 4,
     subset_size: Optional[int] = None,
-    max_steps: Optional[int] = None
+    max_steps: Optional[int] = None,
+    reward_model_epochs: int = 2,
+    reward_model_lr: float = 5e-6,
+    train_reward_model: bool = True,
+    reward_model_path: str = None
 ):
     """Train model using RLOO."""
     try:
@@ -264,16 +268,18 @@ def train_rloo(
                     "sft_model_path": sft_model_path,
                     "method": "rloo",
                     "effective_batch_size": batch_size * gradient_accumulation_steps,
-                    "subset_size": subset_size
+                    "subset_size": subset_size,
+                    "reward_model": "LoRA-adapted " + model_name,
+                    "reward_model_epochs": reward_model_epochs if train_reward_model else 0,
+                    "reward_model_lr": reward_model_lr,
+                    "train_reward_model": train_reward_model,
+                    "reward_model_path": reward_model_path
                 }
             )
         
         # Initialize model and tokenizer from SFT path
         model = QwenModel.from_pretrained(sft_model_path)
         tokenizer = AutoTokenizer.from_pretrained(sft_model_path)
-        
-        # Initialize reward model
-        reward_model = RewardModel(model_name)
         
         # Create dataset and dataloader if not provided
         if dataloader is None:
@@ -289,7 +295,98 @@ def train_rloo(
             print(f"Training on {len(dataset)} examples from {dataset_name}" + 
                   (f" (subset: {subset_size})" if subset_size else ""))
         
-        # Initialize trainer
+        # Reward model setup
+        reward_model_save_path = os.path.join(output_dir, "reward_model")
+        
+        # Check if we should load a pre-trained reward model
+        if reward_model_path:
+            print(f"Loading pre-trained reward model from {reward_model_path}")
+            reward_model = RewardModel.from_pretrained(reward_model_path)
+            print("Pre-trained reward model loaded successfully")
+        else:
+            # Initialize a new reward model
+            reward_model = RewardModel(
+                model_name=model_name,
+                lora_r=8,
+                lora_alpha=32,
+                lora_dropout=0.1
+            )
+            print(f"Initialized LoRA-adapted reward model based on {model_name}")
+            
+            # Train the reward model if needed
+            if train_reward_model:
+                print(f"Training reward model for {reward_model_epochs} epochs...")
+                # Initialize reward trainer
+                reward_trainer = RewardTrainer(
+                    model=reward_model,
+                    learning_rate=reward_model_lr,
+                    weight_decay=0.01
+                )
+                
+                # Training reward model
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                total_steps = 0
+                
+                for epoch in range(reward_model_epochs):
+                    print(f"Reward model training epoch {epoch+1}/{reward_model_epochs}")
+                    epoch_loss = 0
+                    epoch_accuracy = 0
+                    epoch_steps = 0
+                    
+                    for batch in tqdm(dataloader, desc=f"Reward Model Epoch {epoch+1}"):
+                        # Move batch to device
+                        batch = {k: v.to(device) for k, v in batch.items()}
+                        
+                        # Train step
+                        metrics = reward_trainer.train_step(
+                            chosen_ids=batch["chosen_input_ids"],
+                            rejected_ids=batch["rejected_input_ids"],
+                            chosen_mask=batch["chosen_attention_mask"],
+                            rejected_mask=batch["rejected_attention_mask"]
+                        )
+                        
+                        epoch_loss += metrics["loss"]
+                        epoch_accuracy += metrics["accuracy"]
+                        epoch_steps += 1
+                        total_steps += 1
+                        
+                        # Log metrics
+                        if use_wandb:
+                            wandb.log({
+                                "reward_model/loss": metrics["loss"],
+                                "reward_model/accuracy": metrics["accuracy"],
+                                "reward_model/chosen_rewards": metrics["chosen_rewards"],
+                                "reward_model/rejected_rewards": metrics["rejected_rewards"],
+                                "reward_model/step": total_steps
+                            })
+                    
+                    # Log epoch metrics
+                    avg_loss = epoch_loss / epoch_steps
+                    avg_accuracy = epoch_accuracy / epoch_steps
+                    print(f"Reward model epoch {epoch+1} - Loss: {avg_loss:.4f}, Accuracy: {avg_accuracy:.4f}")
+                    
+                    if use_wandb:
+                        wandb.log({
+                            "reward_model/epoch_loss": avg_loss,
+                            "reward_model/epoch_accuracy": avg_accuracy,
+                            "reward_model/epoch": epoch+1
+                        })
+                
+                # Save the trained reward model
+                os.makedirs(reward_model_save_path, exist_ok=True)
+                reward_model.save_pretrained(reward_model_save_path)
+                print(f"Reward model saved to {reward_model_save_path}")
+                
+                # Clear GPU memory after reward model training
+                clear_gpu_memory()
+            else:
+                print("Skipping reward model training, using untrained model (not recommended)")
+        
+        # Set reward model to evaluation mode for RLOO training
+        reward_model.eval()
+        
+        print("Starting RLOO training...")
+        # Initialize RLOO trainer
         trainer = RLOOTrainer(
             model=model,
             reward_model=reward_model,
@@ -299,8 +396,6 @@ def train_rloo(
             use_wandb=use_wandb,
             debug_mode=True  # Always enable debug mode for better diagnostics
         )
-        
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # Train the model
         if max_steps is not None and max_steps > 0:
@@ -386,6 +481,11 @@ if __name__ == "__main__":
     parser.add_argument("--use_wandb", action="store_true", help="Enable W&B logging")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Number of steps to accumulate gradients")
     parser.add_argument("--max_steps", type=int, default=None, help="Maximum number of training steps (overrides num_epochs if set)")
+    # Add reward model training arguments
+    parser.add_argument("--reward_model_epochs", type=int, default=2, help="Number of epochs for reward model training")
+    parser.add_argument("--reward_model_lr", type=float, default=5e-6, help="Learning rate for reward model training")
+    parser.add_argument("--no_train_reward_model", action="store_true", help="Skip reward model training (use existing or untrained model)")
+    parser.add_argument("--reward_model_path", type=str, help="Path to a pre-trained reward model to use instead of training one")
     args = parser.parse_args()
     
     # Set default dataset based on method if not specified
@@ -439,7 +539,11 @@ if __name__ == "__main__":
             use_wandb=args.use_wandb,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             subset_size=args.subset_size,
-            max_steps=args.max_steps
+            max_steps=args.max_steps,
+            reward_model_epochs=args.reward_model_epochs,
+            reward_model_lr=args.reward_model_lr,
+            train_reward_model=not args.no_train_reward_model,
+            reward_model_path=args.reward_model_path
         )
     elif args.method == "eval":
         if not args.model_path:

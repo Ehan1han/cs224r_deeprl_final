@@ -3,30 +3,61 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from peft import get_peft_model, LoraConfig, TaskType, PeftModel
 
 class RewardModel(nn.Module):
     def __init__(
         self,
         model_name: str = "Qwen/Qwen2.5-0.5B",
-        device: str = "cuda" if torch.cuda.is_available() else "cpu"
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        lora_r: int = 8,
+        lora_alpha: int = 32,
+        lora_dropout: float = 0.1
     ):
         """
-        Initialize the reward model.
+        Initialize the reward model with LoRA adaptation.
         
         Args:
             model_name: Name of the model to load
             device: Device to load the model on
+            lora_r: Rank of LoRA adaptation matrices
+            lora_alpha: LoRA alpha parameter
+            lora_dropout: Dropout probability for LoRA layers
         """
         super().__init__()
         self.device = device
         
+        # Initialize tokenizer first
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # Ensure there's a padding token defined
+        if self.tokenizer.pad_token is None:
+            print(f"No padding token found. Setting pad_token to eos_token ({self.tokenizer.eos_token})")
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        
         # Load base model and add a classification head
-        self.model = AutoModelForSequenceClassification.from_pretrained(
+        base_model = AutoModelForSequenceClassification.from_pretrained(
             model_name,
             num_labels=1,
-            problem_type="regression"
+            problem_type="regression",
+            pad_token_id=self.tokenizer.pad_token_id  # Pass the pad token ID
         )
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # Ensure the model's config has the padding token ID set
+        base_model.config.pad_token_id = self.tokenizer.pad_token_id
+        
+        # Define LoRA configuration
+        peft_config = LoraConfig(
+            task_type=TaskType.SEQ_CLS,
+            r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"]  # Target attention layers
+        )
+        
+        # Apply LoRA to the model
+        self.model = get_peft_model(base_model, peft_config)
         self.model.to(device)
         
     def forward(
@@ -44,6 +75,11 @@ class RewardModel(nn.Module):
         Returns:
             Reward values
         """
+        # Ensure inputs are on the correct device
+        input_ids = input_ids.to(self.device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(self.device)
+            
         outputs = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask
@@ -96,9 +132,27 @@ class RewardModel(nn.Module):
     @classmethod
     def from_pretrained(cls, path: str, device: str = "cuda" if torch.cuda.is_available() else "cpu"):
         """Load a saved model."""
+        # Initialize with default values
         model = cls(device=device)
-        model.model = AutoModelForSequenceClassification.from_pretrained(path)
+        
+        # Load the PEFT model
+        if PeftModel.is_peft_model(path):
+            model.model = PeftModel.from_pretrained(path)
+        else:
+            # For backward compatibility, load as regular model if not a PEFT model
+            model.model = AutoModelForSequenceClassification.from_pretrained(path)
+        
         model.tokenizer = AutoTokenizer.from_pretrained(path)
+        
+        # Ensure padding token is set
+        if model.tokenizer.pad_token is None:
+            print(f"No padding token found during loading. Setting pad_token to eos_token.")
+            model.tokenizer.pad_token = model.tokenizer.eos_token
+            model.tokenizer.pad_token_id = model.tokenizer.eos_token_id
+            
+        # Update model config
+        model.model.config.pad_token_id = model.tokenizer.pad_token_id
+        
         model.model.to(device)
         return model
 
