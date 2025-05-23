@@ -342,14 +342,18 @@ class DPOTrainer:
                             print(f"  {result}")
                         print("-------------------------------")
                     
+                    # Remove the call to fix_dpo_masks - use original masks
+                    chosen_mask = batch["chosen_attention_mask"]
+                    rejected_mask = batch["rejected_attention_mask"]
+                    
                     # Forward and backward pass
                     metrics = self.train_step(
                         prompt_ids=prompt_input_ids,
                         chosen_ids=batch["chosen_input_ids"],
                         rejected_ids=batch["rejected_input_ids"],
                         prompt_mask=prompt_attention_mask,
-                        chosen_mask=batch["chosen_attention_mask"],
-                        rejected_mask=batch["rejected_attention_mask"]
+                        chosen_mask=chosen_mask,
+                        rejected_mask=rejected_mask
                     )
                     
                     total_loss += metrics["loss"]
@@ -438,14 +442,18 @@ class DPOTrainer:
                             print(f"  {result}")
                         print("-------------------------------")
                     
+                    # Remove the call to fix_dpo_masks - use original masks
+                    chosen_mask = batch["chosen_attention_mask"]
+                    rejected_mask = batch["rejected_attention_mask"]
+                    
                     # Forward and backward pass
                     metrics = self.train_step(
                         prompt_ids=prompt_input_ids,
                         chosen_ids=batch["chosen_input_ids"],
                         rejected_ids=batch["rejected_input_ids"],
                         prompt_mask=prompt_attention_mask,
-                        chosen_mask=batch["chosen_attention_mask"],
-                        rejected_mask=batch["rejected_attention_mask"]
+                        chosen_mask=chosen_mask,
+                        rejected_mask=rejected_mask
                     )
                     
                     total_loss += metrics["loss"]
@@ -717,14 +725,18 @@ class RLOOTrainer:
                             print(f"  {result}")
                         print("-------------------------------")
                     
+                    # Remove the call to fix_dpo_masks - use original masks
+                    chosen_mask = batch["chosen_attention_mask"]
+                    rejected_mask = batch["rejected_attention_mask"]
+                    
                     # Forward and backward pass
                     metrics = self.train_step(
                         prompt_ids=prompt_input_ids,
                         chosen_ids=batch["chosen_input_ids"],
                         rejected_ids=batch["rejected_input_ids"],
                         prompt_mask=prompt_attention_mask,
-                        chosen_mask=batch["chosen_attention_mask"],
-                        rejected_mask=batch["rejected_attention_mask"]
+                        chosen_mask=chosen_mask,
+                        rejected_mask=rejected_mask
                     )
                     
                     total_loss += metrics["loss"]
@@ -809,14 +821,18 @@ class RLOOTrainer:
                             print(f"  {result}")
                         print("-------------------------------")
                     
+                    # Remove the call to fix_dpo_masks - use original masks
+                    chosen_mask = batch["chosen_attention_mask"]
+                    rejected_mask = batch["rejected_attention_mask"]
+                    
                     # Forward and backward pass
                     metrics = self.train_step(
                         prompt_ids=prompt_input_ids,
                         chosen_ids=batch["chosen_input_ids"],
                         rejected_ids=batch["rejected_input_ids"],
                         prompt_mask=prompt_attention_mask,
-                        chosen_mask=batch["chosen_attention_mask"],
-                        rejected_mask=batch["rejected_attention_mask"]
+                        chosen_mask=chosen_mask,
+                        rejected_mask=rejected_mask
                     )
                     
                     total_loss += metrics["loss"]

@@ -154,7 +154,8 @@ def train_dpo(
     dataloader: Optional[DataLoader] = None,
     gradient_accumulation_steps: int = 4,
     subset_size: Optional[int] = None,
-    max_steps: Optional[int] = None
+    max_steps: Optional[int] = None,
+    prompt_max_length_ratio: float = 0.7  # New parameter for filtering long prompts
 ):
     """Train model using DPO."""
     try:
@@ -174,7 +175,8 @@ def train_dpo(
                     "sft_model_path": sft_model_path,
                     "method": "dpo",
                     "effective_batch_size": batch_size * gradient_accumulation_steps,
-                    "subset_size": subset_size
+                    "subset_size": subset_size,
+                    "prompt_max_length_ratio": prompt_max_length_ratio  # Log new parameter in wandb
                 }
             )
         
@@ -189,7 +191,9 @@ def train_dpo(
                 dataset_name=dataset_name,
                 tokenizer=tokenizer,
                 max_length=max_length,
-                subset_size=subset_size
+                subset_size=subset_size,
+                prompt_max_length_ratio=prompt_max_length_ratio,  # Pass filtering parameter
+                verbose=True  # Enable verbose logging
             )
             dataloader = create_dataloader(dataset, batch_size=batch_size)
             
@@ -244,7 +248,8 @@ def train_rloo(
     dataloader: Optional[DataLoader] = None,
     gradient_accumulation_steps: int = 4,
     subset_size: Optional[int] = None,
-    max_steps: Optional[int] = None
+    max_steps: Optional[int] = None,
+    prompt_max_length_ratio: float = 0.7  # New parameter for filtering long prompts
 ):
     """Train model using RLOO."""
     try:
@@ -264,7 +269,8 @@ def train_rloo(
                     "sft_model_path": sft_model_path,
                     "method": "rloo",
                     "effective_batch_size": batch_size * gradient_accumulation_steps,
-                    "subset_size": subset_size
+                    "subset_size": subset_size,
+                    "prompt_max_length_ratio": prompt_max_length_ratio  # Log new parameter in wandb
                 }
             )
         
@@ -281,7 +287,9 @@ def train_rloo(
                 dataset_name=dataset_name,
                 tokenizer=tokenizer,
                 max_length=max_length,
-                subset_size=subset_size
+                subset_size=subset_size,
+                prompt_max_length_ratio=prompt_max_length_ratio,  # Pass filtering parameter
+                verbose=True  # Enable verbose logging
             )
             dataloader = create_dataloader(dataset, batch_size=batch_size)
             
@@ -386,6 +394,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_wandb", action="store_true", help="Enable W&B logging")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Number of steps to accumulate gradients")
     parser.add_argument("--max_steps", type=int, default=None, help="Maximum number of training steps (overrides num_epochs if set)")
+    parser.add_argument("--prompt_max_length_ratio", type=float, default=0.7, help="Maximum ratio of prompt length to max_length for filtering in DPO/RLOO")
     args = parser.parse_args()
     
     # Set default dataset based on method if not specified
@@ -422,7 +431,8 @@ if __name__ == "__main__":
             use_wandb=args.use_wandb,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             subset_size=args.subset_size,
-            max_steps=args.max_steps
+            max_steps=args.max_steps,
+            prompt_max_length_ratio=args.prompt_max_length_ratio
         )
     elif args.method == "rloo":
         if not args.sft_model_path:
@@ -439,7 +449,8 @@ if __name__ == "__main__":
             use_wandb=args.use_wandb,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             subset_size=args.subset_size,
-            max_steps=args.max_steps
+            max_steps=args.max_steps,
+            prompt_max_length_ratio=args.prompt_max_length_ratio
         )
     elif args.method == "eval":
         if not args.model_path:

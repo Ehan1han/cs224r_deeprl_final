@@ -30,6 +30,7 @@ ENV/
 # Project specific
 wandb/
 outputs/
+outputs_v1/
 Miniconda3-latest-Linux-x86_64.sh
 
 # IDEs and editors

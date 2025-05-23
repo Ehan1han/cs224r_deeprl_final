@@ -1,0 +1,4871 @@
+# Training and Evaluation Pipeline Debugging
+
+## 1. TRAINING PIPELINE DEBUGGING
+
+### 1.1 SmolTalk Dataset (SFT Training)
+
+#### Example 1
+**1. Original Data:**
+```json
+{'messages': [{'content': 'Your response should contain less than 50 words. Do not include keywords [forbidden_words] in the response. [forbidden_words] are: forbidden, restricted, not allowed, prohibited, banned. Finish your response with this exact phrase [ender]. No other words should follow this phrase. [ender] is "Is there anything else I can help with?"\n', 'role': 'user'}, {'content': 'Sure I can help with that Is there anything else I can help with?', 'role': 'assistant'}], 'source': 'smol-contraints'}
+```
+
+**2. After _format_conversation:**
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+Your response should contain less than 50 words. Do not include keywords [forbidden_words] in the response. [forbidden_words] are: forbidden, restricted, not allowed, prohibited, banned. Finish your response with this exact phrase [ender]. No other words should follow this phrase. [ender] is "Is there anything else I can help with?"
+<|im_end|>
+<|im_start|>assistant
+Sure I can help with that Is there anything else I can help with?<|im_end|>
+
+```
+
+**3. After Tokenization:**
+=== SmolTalk Example 1 - Tokenized with Attention Mask ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         0 | <|im_start|>
+   1 |         0 | system
+   2 |         0 | Ċ
+   3 |         0 | You
+   4 |         0 | Ġare
+   5 |         0 | Ġa
+   6 |         0 | Ġhelpful
+   7 |         0 | Ġassistant
+   8 |         0 | .
+   9 |         0 | <|im_end|>
+  10 |         0 | Ċ
+  11 |         0 | <|im_start|>
+  12 |         0 | user
+  13 |         0 | Ċ
+  14 |         0 | Your
+  15 |         0 | Ġresponse
+  16 |         0 | Ġshould
+  17 |         0 | Ġcontain
+  18 |         0 | Ġless
+  19 |         0 | Ġthan
+  20 |         0 | Ġ
+  21 |         0 | 5
+  22 |         0 | 0
+  23 |         0 | Ġwords
+  24 |         0 | .
+  25 |         0 | ĠDo
+  26 |         0 | Ġnot
+  27 |         0 | Ġinclude
+  28 |         0 | Ġkeywords
+  29 |         0 | Ġ[
+  30 |         0 | for
+  31 |         0 | bidden
+  32 |         0 | _words
+  33 |         0 | ]
+  34 |         0 | Ġin
+  35 |         0 | Ġthe
+  36 |         0 | Ġresponse
+  37 |         0 | .
+  38 |         0 | Ġ[
+  39 |         0 | for
+  40 |         0 | bidden
+  41 |         0 | _words
+  42 |         0 | ]
+  43 |         0 | Ġare
+  44 |         0 | :
+  45 |         0 | Ġforbidden
+  46 |         0 | ,
+  47 |         0 | Ġrestricted
+  48 |         0 | ,
+  49 |         0 | Ġnot
+  50 |         0 | Ġallowed
+  51 |         0 | ,
+  52 |         0 | Ġprohibited
+  53 |         0 | ,
+  54 |         0 | Ġbanned
+  55 |         0 | .
+  56 |         0 | ĠFinish
+  57 |         0 | Ġyour
+  58 |         0 | Ġresponse
+  59 |         0 | Ġwith
+  60 |         0 | Ġthis
+  61 |         0 | Ġexact
+  62 |         0 | Ġphrase
+  63 |         0 | Ġ[
+  64 |         0 | ender
+  65 |         0 | ].
+  66 |         0 | ĠNo
+  67 |         0 | Ġother
+  68 |         0 | Ġwords
+  69 |         0 | Ġshould
+  70 |         0 | Ġfollow
+  71 |         0 | Ġthis
+  72 |         0 | Ġphrase
+  73 |         0 | .
+  74 |         0 | Ġ[
+  75 |         0 | ender
+  76 |         0 | ]
+  77 |         0 | Ġis
+  78 |         0 | Ġ"
+  79 |         0 | Is
+  80 |         0 | Ġthere
+  81 |         0 | Ġanything
+  82 |         0 | Ġelse
+  83 |         0 | ĠI
+  84 |         0 | Ġcan
+  85 |         0 | Ġhelp
+  86 |         0 | Ġwith
+  87 |         0 | ?"Ċ
+  88 |         0 | <|im_end|>
+  89 |         0 | Ċ
+  90 |         0 | <|im_start|>
+  91 |         0 | assistant
+  92 |         0 | Ċ
+  93 |         1 | Sure
+  94 |         1 | ĠI
+  95 |         1 | Ġcan
+  96 |         1 | Ġhelp
+  97 |         1 | Ġwith
+  98 |         1 | Ġthat
+  99 |         1 | ĠIs
+ 100 |         1 | Ġthere
+ 101 |         1 | Ġanything
+ 102 |         1 | Ġelse
+ 103 |         1 | ĠI
+ 104 |         1 | Ġcan
+ 105 |         1 | Ġhelp
+ 106 |         1 | Ġwith
+ 107 |         1 | ?
+ 108 |         1 | <|im_end|>
+ 109 |         1 | Ċ
+
+**4. Attention Mask Analysis:**
+- Assistant marker position in text: 421
+- First token with mask=1: 93
+- Has clear boundary: Yes
+- Percentage of tokens with mask=1: 87.19%
+
+----------------------------------------------------------------------
+
+#### Example 2
+**1. Original Data:**
+```json
+{'messages': [{'content': 'Create a Python function to sort a list of tuples based on the sum of the first three elements, and then use the fourth element to break ties.\n\nInput: List of tuples, where each tuple has at least 4 elements, and the first three elements are integers.\n\nOutput: The sorted list of tuples based on the sum of the first three elements, and then the fourth element if there is a tie.\n\nExample 1: Input: [(1, 2, 3, 4), (4, 3, 2, 1), (3, 2, 1, 0)], Output: [(3, 2, 1, 0), (1, 2, 3, 4), (4, 3, 2, 1)]\n\nExample 2: Input: [(1, 2, 3, 4), (1, 2, 3, 5), (4, 3, 2, 1)], Output: [(1, 2, 3, 4), (1, 2, 3, 5), (4, 3, 2, 1)]\n\nExample 3: Input: [(1, 2, 3, 4), (1, 2, 3, 4), (1, 2, 3, 4)], Output: [(1, 2, 3, 4), (1, 2, 3, 4), (1, 2, 3, 4)]', 'role': 'user'}, {'content': "First, let's break down the problem description into smaller parts:\n- We have a list of tuples, where each tuple has at least 4 elements, and the first three elements are integers.\n- We want to sort the tuples based on the sum of the first three elements.\n- If there is a tie, we want to use the fourth element to break the tie.\n\nTo sort the tuples based on the sum of the first three elements, we can define a key function that returns the sum of the first three elements of each tuple. Then, we can use the built-in `sorted` function in Python with the `key` argument to sort the list of tuples.\n\nTo break ties using the fourth element, we can define a second key function that returns the fourth element of each tuple. Then, we can pass this second key function as an argument to the `key` argument of the `sorted` function.\n\nHere is the Python implementation:\n\n```python\ndef sort_tuples(tuples):\n    def sum_key(tuple):\n        return sum(tuple[:3])\n\n    def fourth_key(tuple):\n        return tuple[3]\n\n    return sorted(tuples, key=lambda x: (sum_key(x), fourth_key(x)))\n```", 'role': 'assistant'}], 'source': 'self-oss-instruct'}
+```
+
+**2. After _format_conversation:**
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+Create a Python function to sort a list of tuples based on the sum of the first three elements, and then use the fourth element to break ties.
+
+Input: List of tuples, where each tuple has at least 4 elements, and the first three elements are integers.
+
+Output: The sorted list of tuples based on the sum of the first three elements, and then the fourth element if there is a tie.
+
+Example 1: Input: [(1, 2, 3, 4), (4, 3, 2, 1), (3, 2, 1, 0)], Output: [(3, 2, 1, 0), (1, 2, 3, 4), (4, 3, 2, 1)]
+
+Example 2: Input: [(1, 2, 3, 4), (1, 2, 3, 5), (4, 3, 2, 1)], Output: [(1, 2, 3, 4), (1, 2, 3, 5), (4, 3, 2, 1)]
+
+Example 3: Input: [(1, 2, 3, 4), (1, 2, 3, 4), (1, 2, 3, 4)], Output: [(1, 2, 3, 4), (1, 2, 3, 4), (1, 2, 3, 4)]<|im_end|>
+<|im_start|>assistant
+First, let's break down the problem description into smaller parts:
+- We have a list of tuples, where each tuple has at least 4 elements, and the first three elements are integers.
+- We want to sort the tuples based on the sum of the first three elements.
+- If there is a tie, we want to use the fourth element to break the tie.
+
+To sort the tuples based on the sum of the first three elements, we can define a key function that returns the sum of the first three elements of each tuple. Then, we can use the built-in `sorted` function in Python with the `key` argument to sort the list of tuples.
+
+To break ties using the fourth element, we can define a second key function that returns the fourth element of each tuple. Then, we can pass this second key function as an argument to the `key` argument of the `sorted` function.
+
+Here is the Python implementation:
+
+```python
+def sort_tuples(tuples):
+    def sum_key(tuple):
+        return sum(tuple[:3])
+
+    def fourth_key(tuple):
+        return tuple[3]
+
+    return sorted(tuples, key=lambda x: (sum_key(x), fourth_key(x)))
+```<|im_end|>
+
+```
+
+**3. After Tokenization:**
+=== SmolTalk Example 2 - Tokenized with Attention Mask ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         0 | <|im_start|>
+   1 |         0 | system
+   2 |         0 | Ċ
+   3 |         0 | You
+   4 |         0 | Ġare
+   5 |         0 | Ġa
+   6 |         0 | Ġhelpful
+   7 |         0 | Ġassistant
+   8 |         0 | .
+   9 |         0 | <|im_end|>
+  10 |         0 | Ċ
+  11 |         0 | <|im_start|>
+  12 |         0 | user
+  13 |         0 | Ċ
+  14 |         0 | Create
+  15 |         0 | Ġa
+  16 |         0 | ĠPython
+  17 |         0 | Ġfunction
+  18 |         0 | Ġto
+  19 |         0 | Ġsort
+  20 |         0 | Ġa
+  21 |         0 | Ġlist
+  22 |         0 | Ġof
+  23 |         0 | Ġtuples
+  24 |         0 | Ġbased
+  25 |         0 | Ġon
+  26 |         0 | Ġthe
+  27 |         0 | Ġsum
+  28 |         0 | Ġof
+  29 |         0 | Ġthe
+  30 |         0 | Ġfirst
+  31 |         0 | Ġthree
+  32 |         0 | Ġelements
+  33 |         0 | ,
+  34 |         0 | Ġand
+  35 |         0 | Ġthen
+  36 |         0 | Ġuse
+  37 |         0 | Ġthe
+  38 |         0 | Ġfourth
+  39 |         0 | Ġelement
+  40 |         0 | Ġto
+  41 |         0 | Ġbreak
+  42 |         0 | Ġties
+  43 |         0 | .ĊĊ
+  44 |         0 | Input
+  45 |         0 | :
+  46 |         0 | ĠList
+  47 |         0 | Ġof
+  48 |         0 | Ġtuples
+  49 |         0 | ,
+  50 |         0 | Ġwhere
+  51 |         0 | Ġeach
+  52 |         0 | Ġtuple
+  53 |         0 | Ġhas
+  54 |         0 | Ġat
+  55 |         0 | Ġleast
+  56 |         0 | Ġ
+  57 |         0 | 4
+  58 |         0 | Ġelements
+  59 |         0 | ,
+  60 |         0 | Ġand
+  61 |         0 | Ġthe
+  62 |         0 | Ġfirst
+  63 |         0 | Ġthree
+  64 |         0 | Ġelements
+  65 |         0 | Ġare
+  66 |         0 | Ġintegers
+  67 |         0 | .ĊĊ
+  68 |         0 | Output
+  69 |         0 | :
+  70 |         0 | ĠThe
+  71 |         0 | Ġsorted
+  72 |         0 | Ġlist
+  73 |         0 | Ġof
+  74 |         0 | Ġtuples
+  75 |         0 | Ġbased
+  76 |         0 | Ġon
+  77 |         0 | Ġthe
+  78 |         0 | Ġsum
+  79 |         0 | Ġof
+  80 |         0 | Ġthe
+  81 |         0 | Ġfirst
+  82 |         0 | Ġthree
+  83 |         0 | Ġelements
+  84 |         0 | ,
+  85 |         0 | Ġand
+  86 |         0 | Ġthen
+  87 |         0 | Ġthe
+  88 |         0 | Ġfourth
+  89 |         0 | Ġelement
+  90 |         0 | Ġif
+  91 |         0 | Ġthere
+  92 |         0 | Ġis
+  93 |         0 | Ġa
+  94 |         0 | Ġtie
+  95 |         0 | .ĊĊ
+  96 |         0 | Example
+  97 |         0 | Ġ
+  98 |         0 | 1
+  99 |         0 | :
+ 100 |         0 | ĠInput
+ 101 |         0 | :
+ 102 |         0 | Ġ[(
+ 103 |         0 | 1
+ 104 |         0 | ,
+ 105 |         0 | Ġ
+ 106 |         0 | 2
+ 107 |         0 | ,
+ 108 |         0 | Ġ
+ 109 |         0 | 3
+ 110 |         0 | ,
+ 111 |         0 | Ġ
+ 112 |         0 | 4
+ 113 |         0 | ),
+ 114 |         0 | Ġ(
+ 115 |         0 | 4
+ 116 |         0 | ,
+ 117 |         0 | Ġ
+ 118 |         0 | 3
+ 119 |         0 | ,
+ 120 |         0 | Ġ
+ 121 |         0 | 2
+ 122 |         0 | ,
+ 123 |         0 | Ġ
+ 124 |         0 | 1
+ 125 |         0 | ),
+ 126 |         0 | Ġ(
+ 127 |         0 | 3
+ 128 |         0 | ,
+ 129 |         0 | Ġ
+ 130 |         0 | 2
+ 131 |         0 | ,
+ 132 |         0 | Ġ
+ 133 |         0 | 1
+ 134 |         0 | ,
+ 135 |         0 | Ġ
+ 136 |         0 | 0
+ 137 |         0 | )],
+ 138 |         0 | ĠOutput
+ 139 |         0 | :
+ 140 |         0 | Ġ[(
+ 141 |         0 | 3
+ 142 |         0 | ,
+ 143 |         0 | Ġ
+ 144 |         0 | 2
+ 145 |         0 | ,
+ 146 |         0 | Ġ
+ 147 |         0 | 1
+ 148 |         0 | ,
+ 149 |         0 | Ġ
+ 150 |         0 | 0
+ 151 |         0 | ),
+ 152 |         0 | Ġ(
+ 153 |         0 | 1
+ 154 |         0 | ,
+ 155 |         0 | Ġ
+ 156 |         0 | 2
+ 157 |         0 | ,
+ 158 |         0 | Ġ
+ 159 |         0 | 3
+ 160 |         0 | ,
+ 161 |         0 | Ġ
+ 162 |         0 | 4
+ 163 |         0 | ),
+ 164 |         0 | Ġ(
+ 165 |         0 | 4
+ 166 |         0 | ,
+ 167 |         0 | Ġ
+ 168 |         0 | 3
+ 169 |         0 | ,
+ 170 |         0 | Ġ
+ 171 |         0 | 2
+ 172 |         0 | ,
+ 173 |         0 | Ġ
+ 174 |         0 | 1
+ 175 |         0 | )]ĊĊ
+ 176 |         0 | Example
+ 177 |         0 | Ġ
+ 178 |         0 | 2
+ 179 |         0 | :
+ 180 |         0 | ĠInput
+ 181 |         0 | :
+ 182 |         0 | Ġ[(
+ 183 |         0 | 1
+ 184 |         0 | ,
+ 185 |         0 | Ġ
+ 186 |         0 | 2
+ 187 |         0 | ,
+ 188 |         0 | Ġ
+ 189 |         0 | 3
+ 190 |         0 | ,
+ 191 |         0 | Ġ
+ 192 |         0 | 4
+ 193 |         0 | ),
+ 194 |         0 | Ġ(
+ 195 |         0 | 1
+ 196 |         0 | ,
+ 197 |         0 | Ġ
+ 198 |         0 | 2
+ 199 |         0 | ,
+ 200 |         0 | Ġ
+ 201 |         0 | 3
+ 202 |         0 | ,
+ 203 |         0 | Ġ
+ 204 |         0 | 5
+ 205 |         0 | ),
+ 206 |         0 | Ġ(
+ 207 |         0 | 4
+ 208 |         0 | ,
+ 209 |         0 | Ġ
+ 210 |         0 | 3
+ 211 |         0 | ,
+ 212 |         0 | Ġ
+ 213 |         0 | 2
+ 214 |         0 | ,
+ 215 |         0 | Ġ
+ 216 |         0 | 1
+ 217 |         0 | )],
+ 218 |         0 | ĠOutput
+ 219 |         0 | :
+ 220 |         0 | Ġ[(
+ 221 |         0 | 1
+ 222 |         0 | ,
+ 223 |         0 | Ġ
+ 224 |         0 | 2
+ 225 |         0 | ,
+ 226 |         0 | Ġ
+ 227 |         0 | 3
+ 228 |         0 | ,
+ 229 |         0 | Ġ
+ 230 |         0 | 4
+ 231 |         0 | ),
+ 232 |         0 | Ġ(
+ 233 |         0 | 1
+ 234 |         0 | ,
+ 235 |         0 | Ġ
+ 236 |         0 | 2
+ 237 |         0 | ,
+ 238 |         0 | Ġ
+ 239 |         0 | 3
+ 240 |         0 | ,
+ 241 |         0 | Ġ
+ 242 |         0 | 5
+ 243 |         0 | ),
+ 244 |         0 | Ġ(
+ 245 |         0 | 4
+ 246 |         0 | ,
+ 247 |         0 | Ġ
+ 248 |         0 | 3
+ 249 |         0 | ,
+ 250 |         0 | Ġ
+ 251 |         0 | 2
+ 252 |         0 | ,
+ 253 |         0 | Ġ
+ 254 |         0 | 1
+ 255 |         0 | )]ĊĊ
+ 256 |         0 | Example
+ 257 |         0 | Ġ
+ 258 |         0 | 3
+ 259 |         0 | :
+ 260 |         0 | ĠInput
+ 261 |         0 | :
+ 262 |         0 | Ġ[(
+ 263 |         0 | 1
+ 264 |         0 | ,
+ 265 |         0 | Ġ
+ 266 |         0 | 2
+ 267 |         0 | ,
+ 268 |         0 | Ġ
+ 269 |         0 | 3
+ 270 |         0 | ,
+ 271 |         0 | Ġ
+ 272 |         0 | 4
+ 273 |         0 | ),
+ 274 |         0 | Ġ(
+ 275 |         0 | 1
+ 276 |         0 | ,
+ 277 |         0 | Ġ
+ 278 |         0 | 2
+ 279 |         0 | ,
+ 280 |         0 | Ġ
+ 281 |         0 | 3
+ 282 |         0 | ,
+ 283 |         0 | Ġ
+ 284 |         0 | 4
+ 285 |         0 | ),
+ 286 |         0 | Ġ(
+ 287 |         0 | 1
+ 288 |         0 | ,
+ 289 |         0 | Ġ
+ 290 |         0 | 2
+ 291 |         0 | ,
+ 292 |         0 | Ġ
+ 293 |         0 | 3
+ 294 |         0 | ,
+ 295 |         0 | Ġ
+ 296 |         0 | 4
+ 297 |         0 | )],
+ 298 |         0 | ĠOutput
+ 299 |         0 | :
+ 300 |         0 | Ġ[(
+ 301 |         0 | 1
+ 302 |         0 | ,
+ 303 |         0 | Ġ
+ 304 |         0 | 2
+ 305 |         0 | ,
+ 306 |         0 | Ġ
+ 307 |         0 | 3
+ 308 |         0 | ,
+ 309 |         0 | Ġ
+ 310 |         0 | 4
+ 311 |         0 | ),
+ 312 |         0 | Ġ(
+ 313 |         0 | 1
+ 314 |         0 | ,
+ 315 |         0 | Ġ
+ 316 |         0 | 2
+ 317 |         0 | ,
+ 318 |         0 | Ġ
+ 319 |         0 | 3
+ 320 |         0 | ,
+ 321 |         0 | Ġ
+ 322 |         0 | 4
+ 323 |         0 | ),
+ 324 |         0 | Ġ(
+ 325 |         0 | 1
+ 326 |         0 | ,
+ 327 |         0 | Ġ
+ 328 |         0 | 2
+ 329 |         0 | ,
+ 330 |         0 | Ġ
+ 331 |         0 | 3
+ 332 |         0 | ,
+ 333 |         0 | Ġ
+ 334 |         0 | 4
+ 335 |         0 | )]
+ 336 |         0 | <|im_end|>
+ 337 |         0 | Ċ
+ 338 |         0 | <|im_start|>
+ 339 |         0 | assistant
+ 340 |         0 | Ċ
+ 341 |         1 | First
+ 342 |         1 | ,
+ 343 |         1 | Ġlet
+ 344 |         1 | 's
+ 345 |         1 | Ġbreak
+ 346 |         1 | Ġdown
+ 347 |         1 | Ġthe
+ 348 |         1 | Ġproblem
+ 349 |         1 | Ġdescription
+ 350 |         1 | Ġinto
+ 351 |         1 | Ġsmaller
+ 352 |         1 | Ġparts
+ 353 |         1 | :Ċ
+ 354 |         1 | -
+ 355 |         1 | ĠWe
+ 356 |         1 | Ġhave
+ 357 |         1 | Ġa
+ 358 |         1 | Ġlist
+ 359 |         1 | Ġof
+ 360 |         1 | Ġtuples
+ 361 |         1 | ,
+ 362 |         1 | Ġwhere
+ 363 |         1 | Ġeach
+ 364 |         1 | Ġtuple
+ 365 |         1 | Ġhas
+ 366 |         1 | Ġat
+ 367 |         1 | Ġleast
+ 368 |         1 | Ġ
+ 369 |         1 | 4
+ 370 |         1 | Ġelements
+ 371 |         1 | ,
+ 372 |         1 | Ġand
+ 373 |         1 | Ġthe
+ 374 |         1 | Ġfirst
+ 375 |         1 | Ġthree
+ 376 |         1 | Ġelements
+ 377 |         1 | Ġare
+ 378 |         1 | Ġintegers
+ 379 |         1 | .Ċ
+ 380 |         1 | -
+ 381 |         1 | ĠWe
+ 382 |         1 | Ġwant
+ 383 |         1 | Ġto
+ 384 |         1 | Ġsort
+ 385 |         1 | Ġthe
+ 386 |         1 | Ġtuples
+ 387 |         1 | Ġbased
+ 388 |         1 | Ġon
+ 389 |         1 | Ġthe
+ 390 |         1 | Ġsum
+ 391 |         1 | Ġof
+ 392 |         1 | Ġthe
+ 393 |         1 | Ġfirst
+ 394 |         1 | Ġthree
+ 395 |         1 | Ġelements
+ 396 |         1 | .Ċ
+ 397 |         1 | -
+ 398 |         1 | ĠIf
+ 399 |         1 | Ġthere
+ 400 |         1 | Ġis
+ 401 |         1 | Ġa
+ 402 |         1 | Ġtie
+ 403 |         1 | ,
+ 404 |         1 | Ġwe
+ 405 |         1 | Ġwant
+ 406 |         1 | Ġto
+ 407 |         1 | Ġuse
+ 408 |         1 | Ġthe
+ 409 |         1 | Ġfourth
+ 410 |         1 | Ġelement
+ 411 |         1 | Ġto
+ 412 |         1 | Ġbreak
+ 413 |         1 | Ġthe
+ 414 |         1 | Ġtie
+ 415 |         1 | .ĊĊ
+ 416 |         1 | To
+ 417 |         1 | Ġsort
+ 418 |         1 | Ġthe
+ 419 |         1 | Ġtuples
+ 420 |         1 | Ġbased
+ 421 |         1 | Ġon
+ 422 |         1 | Ġthe
+ 423 |         1 | Ġsum
+ 424 |         1 | Ġof
+ 425 |         1 | Ġthe
+ 426 |         1 | Ġfirst
+ 427 |         1 | Ġthree
+ 428 |         1 | Ġelements
+ 429 |         1 | ,
+ 430 |         1 | Ġwe
+ 431 |         1 | Ġcan
+ 432 |         1 | Ġdefine
+ 433 |         1 | Ġa
+ 434 |         1 | Ġkey
+ 435 |         1 | Ġfunction
+ 436 |         1 | Ġthat
+ 437 |         1 | Ġreturns
+ 438 |         1 | Ġthe
+ 439 |         1 | Ġsum
+ 440 |         1 | Ġof
+ 441 |         1 | Ġthe
+ 442 |         1 | Ġfirst
+ 443 |         1 | Ġthree
+ 444 |         1 | Ġelements
+ 445 |         1 | Ġof
+ 446 |         1 | Ġeach
+ 447 |         1 | Ġtuple
+ 448 |         1 | .
+ 449 |         1 | ĠThen
+ 450 |         1 | ,
+ 451 |         1 | Ġwe
+ 452 |         1 | Ġcan
+ 453 |         1 | Ġuse
+ 454 |         1 | Ġthe
+ 455 |         1 | Ġbuilt
+ 456 |         1 | -in
+ 457 |         1 | Ġ`
+ 458 |         1 | sorted
+ 459 |         1 | `
+ 460 |         1 | Ġfunction
+ 461 |         1 | Ġin
+ 462 |         1 | ĠPython
+ 463 |         1 | Ġwith
+ 464 |         1 | Ġthe
+ 465 |         1 | Ġ`
+ 466 |         1 | key
+ 467 |         1 | `
+ 468 |         1 | Ġargument
+ 469 |         1 | Ġto
+ 470 |         1 | Ġsort
+ 471 |         1 | Ġthe
+ 472 |         1 | Ġlist
+ 473 |         1 | Ġof
+ 474 |         1 | Ġtuples
+ 475 |         1 | .ĊĊ
+ 476 |         1 | To
+ 477 |         1 | Ġbreak
+ 478 |         1 | Ġties
+ 479 |         1 | Ġusing
+ 480 |         1 | Ġthe
+ 481 |         1 | Ġfourth
+ 482 |         1 | Ġelement
+ 483 |         1 | ,
+ 484 |         1 | Ġwe
+ 485 |         1 | Ġcan
+ 486 |         1 | Ġdefine
+ 487 |         1 | Ġa
+ 488 |         1 | Ġsecond
+ 489 |         1 | Ġkey
+ 490 |         1 | Ġfunction
+ 491 |         1 | Ġthat
+ 492 |         1 | Ġreturns
+ 493 |         1 | Ġthe
+ 494 |         1 | Ġfourth
+ 495 |         1 | Ġelement
+ 496 |         1 | Ġof
+ 497 |         1 | Ġeach
+ 498 |         1 | Ġtuple
+ 499 |         1 | .
+ 500 |         1 | ĠThen
+ 501 |         1 | ,
+ 502 |         1 | Ġwe
+ 503 |         1 | Ġcan
+ 504 |         1 | Ġpass
+ 505 |         1 | Ġthis
+ 506 |         1 | Ġsecond
+ 507 |         1 | Ġkey
+ 508 |         1 | Ġfunction
+ 509 |         1 | Ġas
+ 510 |         1 | Ġan
+ 511 |         1 | Ġargument
+ 512 |         1 | Ġto
+ 513 |         1 | Ġthe
+ 514 |         1 | Ġ`
+ 515 |         1 | key
+ 516 |         1 | `
+ 517 |         1 | Ġargument
+ 518 |         1 | Ġof
+ 519 |         1 | Ġthe
+ 520 |         1 | Ġ`
+ 521 |         1 | sorted
+ 522 |         1 | `
+ 523 |         1 | Ġfunction
+ 524 |         1 | .ĊĊ
+ 525 |         1 | Here
+ 526 |         1 | Ġis
+ 527 |         1 | Ġthe
+ 528 |         1 | ĠPython
+ 529 |         1 | Ġimplementation
+ 530 |         1 | :ĊĊ
+ 531 |         1 | ```
+ 532 |         1 | python
+ 533 |         1 | Ċ
+ 534 |         1 | def
+ 535 |         1 | Ġsort
+ 536 |         1 | _tuples
+ 537 |         1 | (t
+ 538 |         1 | uples
+ 539 |         1 | ):Ċ
+ 540 |         1 | ĠĠĠ
+ 541 |         1 | Ġdef
+ 542 |         1 | Ġsum
+ 543 |         1 | _key
+ 544 |         1 | (tuple
+ 545 |         1 | ):Ċ
+ 546 |         1 | ĠĠĠĠĠĠĠ
+ 547 |         1 | Ġreturn
+ 548 |         1 | Ġsum
+ 549 |         1 | (tuple
+ 550 |         1 | [:
+ 551 |         1 | 3
+ 552 |         1 | ])ĊĊ
+ 553 |         1 | ĠĠĠ
+ 554 |         1 | Ġdef
+ 555 |         1 | Ġfourth
+ 556 |         1 | _key
+ 557 |         1 | (tuple
+ 558 |         1 | ):Ċ
+ 559 |         1 | ĠĠĠĠĠĠĠ
+ 560 |         1 | Ġreturn
+ 561 |         1 | Ġtuple
+ 562 |         1 | [
+ 563 |         1 | 3
+ 564 |         1 | ]ĊĊ
+ 565 |         1 | ĠĠĠ
+ 566 |         1 | Ġreturn
+ 567 |         1 | Ġsorted
+ 568 |         1 | (t
+ 569 |         1 | uples
+ 570 |         1 | ,
+ 571 |         1 | Ġkey
+ 572 |         1 | =lambda
+ 573 |         1 | Ġx
+ 574 |         1 | :
+ 575 |         1 | Ġ(
+ 576 |         1 | sum
+ 577 |         1 | _key
+ 578 |         1 | (x
+ 579 |         1 | ),
+ 580 |         1 | Ġfourth
+ 581 |         1 | _key
+ 582 |         1 | (x
+ 583 |         1 | )))Ċ
+ 584 |         1 | ```
+ 585 |         1 | <|im_end|>
+ 586 |         1 | Ċ
+
+**4. Attention Mask Analysis:**
+- Assistant marker position in text: 807
+- First token with mask=1: 341
+- Has clear boundary: Yes
+- Percentage of tokens with mask=1: 53.03%
+
+----------------------------------------------------------------------
+
+#### Example 3
+**1. Original Data:**
+```json
+{'messages': [{'content': 'Create a Python function that accepts a list of integers and returns a dictionary where the keys are the integers from the list and the values are the index of the first occurrence of each integer in the given list. For example, given the list [1, 2, 3, 1, 4], the function should return {1: 0, 2: 1, 3: 2, 4: 4}.', 'role': 'user'}, {'content': "To solve this problem, you can use a `for` loop to iterate through the list, and a `dict` to keep track of the index of the first occurrence of each integer.\n\nHere's how you can do it in Python:\n\n```python\ndef first_occurrences(nums):\n    result = {}\n    for i, num in enumerate(nums):\n        if num not in result:\n            result[num] = i\n    return result\n```", 'role': 'assistant'}], 'source': 'self-oss-instruct'}
+```
+
+**2. After _format_conversation:**
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+Create a Python function that accepts a list of integers and returns a dictionary where the keys are the integers from the list and the values are the index of the first occurrence of each integer in the given list. For example, given the list [1, 2, 3, 1, 4], the function should return {1: 0, 2: 1, 3: 2, 4: 4}.<|im_end|>
+<|im_start|>assistant
+To solve this problem, you can use a `for` loop to iterate through the list, and a `dict` to keep track of the index of the first occurrence of each integer.
+
+Here's how you can do it in Python:
+
+```python
+def first_occurrences(nums):
+    result = {}
+    for i, num in enumerate(nums):
+        if num not in result:
+            result[num] = i
+    return result
+```<|im_end|>
+
+```
+
+**3. After Tokenization:**
+=== SmolTalk Example 3 - Tokenized with Attention Mask ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         0 | <|im_start|>
+   1 |         0 | system
+   2 |         0 | Ċ
+   3 |         0 | You
+   4 |         0 | Ġare
+   5 |         0 | Ġa
+   6 |         0 | Ġhelpful
+   7 |         0 | Ġassistant
+   8 |         0 | .
+   9 |         0 | <|im_end|>
+  10 |         0 | Ċ
+  11 |         0 | <|im_start|>
+  12 |         0 | user
+  13 |         0 | Ċ
+  14 |         0 | Create
+  15 |         0 | Ġa
+  16 |         0 | ĠPython
+  17 |         0 | Ġfunction
+  18 |         0 | Ġthat
+  19 |         0 | Ġaccepts
+  20 |         0 | Ġa
+  21 |         0 | Ġlist
+  22 |         0 | Ġof
+  23 |         0 | Ġintegers
+  24 |         0 | Ġand
+  25 |         0 | Ġreturns
+  26 |         0 | Ġa
+  27 |         0 | Ġdictionary
+  28 |         0 | Ġwhere
+  29 |         0 | Ġthe
+  30 |         0 | Ġkeys
+  31 |         0 | Ġare
+  32 |         0 | Ġthe
+  33 |         0 | Ġintegers
+  34 |         0 | Ġfrom
+  35 |         0 | Ġthe
+  36 |         0 | Ġlist
+  37 |         0 | Ġand
+  38 |         0 | Ġthe
+  39 |         0 | Ġvalues
+  40 |         0 | Ġare
+  41 |         0 | Ġthe
+  42 |         0 | Ġindex
+  43 |         0 | Ġof
+  44 |         0 | Ġthe
+  45 |         0 | Ġfirst
+  46 |         0 | Ġoccurrence
+  47 |         0 | Ġof
+  48 |         0 | Ġeach
+  49 |         0 | Ġinteger
+  50 |         0 | Ġin
+  51 |         0 | Ġthe
+  52 |         0 | Ġgiven
+  53 |         0 | Ġlist
+  54 |         0 | .
+  55 |         0 | ĠFor
+  56 |         0 | Ġexample
+  57 |         0 | ,
+  58 |         0 | Ġgiven
+  59 |         0 | Ġthe
+  60 |         0 | Ġlist
+  61 |         0 | Ġ[
+  62 |         0 | 1
+  63 |         0 | ,
+  64 |         0 | Ġ
+  65 |         0 | 2
+  66 |         0 | ,
+  67 |         0 | Ġ
+  68 |         0 | 3
+  69 |         0 | ,
+  70 |         0 | Ġ
+  71 |         0 | 1
+  72 |         0 | ,
+  73 |         0 | Ġ
+  74 |         0 | 4
+  75 |         0 | ],
+  76 |         0 | Ġthe
+  77 |         0 | Ġfunction
+  78 |         0 | Ġshould
+  79 |         0 | Ġreturn
+  80 |         0 | Ġ{
+  81 |         0 | 1
+  82 |         0 | :
+  83 |         0 | Ġ
+  84 |         0 | 0
+  85 |         0 | ,
+  86 |         0 | Ġ
+  87 |         0 | 2
+  88 |         0 | :
+  89 |         0 | Ġ
+  90 |         0 | 1
+  91 |         0 | ,
+  92 |         0 | Ġ
+  93 |         0 | 3
+  94 |         0 | :
+  95 |         0 | Ġ
+  96 |         0 | 2
+  97 |         0 | ,
+  98 |         0 | Ġ
+  99 |         0 | 4
+ 100 |         0 | :
+ 101 |         0 | Ġ
+ 102 |         0 | 4
+ 103 |         0 | }.
+ 104 |         0 | <|im_end|>
+ 105 |         0 | Ċ
+ 106 |         0 | <|im_start|>
+ 107 |         0 | assistant
+ 108 |         0 | Ċ
+ 109 |         1 | To
+ 110 |         1 | Ġsolve
+ 111 |         1 | Ġthis
+ 112 |         1 | Ġproblem
+ 113 |         1 | ,
+ 114 |         1 | Ġyou
+ 115 |         1 | Ġcan
+ 116 |         1 | Ġuse
+ 117 |         1 | Ġa
+ 118 |         1 | Ġ`
+ 119 |         1 | for
+ 120 |         1 | `
+ 121 |         1 | Ġloop
+ 122 |         1 | Ġto
+ 123 |         1 | Ġiterate
+ 124 |         1 | Ġthrough
+ 125 |         1 | Ġthe
+ 126 |         1 | Ġlist
+ 127 |         1 | ,
+ 128 |         1 | Ġand
+ 129 |         1 | Ġa
+ 130 |         1 | Ġ`
+ 131 |         1 | dict
+ 132 |         1 | `
+ 133 |         1 | Ġto
+ 134 |         1 | Ġkeep
+ 135 |         1 | Ġtrack
+ 136 |         1 | Ġof
+ 137 |         1 | Ġthe
+ 138 |         1 | Ġindex
+ 139 |         1 | Ġof
+ 140 |         1 | Ġthe
+ 141 |         1 | Ġfirst
+ 142 |         1 | Ġoccurrence
+ 143 |         1 | Ġof
+ 144 |         1 | Ġeach
+ 145 |         1 | Ġinteger
+ 146 |         1 | .ĊĊ
+ 147 |         1 | Here
+ 148 |         1 | 's
+ 149 |         1 | Ġhow
+ 150 |         1 | Ġyou
+ 151 |         1 | Ġcan
+ 152 |         1 | Ġdo
+ 153 |         1 | Ġit
+ 154 |         1 | Ġin
+ 155 |         1 | ĠPython
+ 156 |         1 | :ĊĊ
+ 157 |         1 | ```
+ 158 |         1 | python
+ 159 |         1 | Ċ
+ 160 |         1 | def
+ 161 |         1 | Ġfirst
+ 162 |         1 | _occ
+ 163 |         1 | urrences
+ 164 |         1 | (nums
+ 165 |         1 | ):Ċ
+ 166 |         1 | ĠĠĠ
+ 167 |         1 | Ġresult
+ 168 |         1 | Ġ=
+ 169 |         1 | Ġ{}Ċ
+ 170 |         1 | ĠĠĠ
+ 171 |         1 | Ġfor
+ 172 |         1 | Ġi
+ 173 |         1 | ,
+ 174 |         1 | Ġnum
+ 175 |         1 | Ġin
+ 176 |         1 | Ġenumerate
+ 177 |         1 | (nums
+ 178 |         1 | ):Ċ
+ 179 |         1 | ĠĠĠĠĠĠĠ
+ 180 |         1 | Ġif
+ 181 |         1 | Ġnum
+ 182 |         1 | Ġnot
+ 183 |         1 | Ġin
+ 184 |         1 | Ġresult
+ 185 |         1 | :Ċ
+ 186 |         1 | ĠĠĠĠĠĠĠĠĠĠĠ
+ 187 |         1 | Ġresult
+ 188 |         1 | [num
+ 189 |         1 | ]
+ 190 |         1 | Ġ=
+ 191 |         1 | Ġi
+ 192 |         1 | Ċ
+ 193 |         1 | ĠĠĠ
+ 194 |         1 | Ġreturn
+ 195 |         1 | Ġresult
+ 196 |         1 | Ċ
+ 197 |         1 | ```
+ 198 |         1 | <|im_end|>
+ 199 |         1 | Ċ
+
+**4. Attention Mask Analysis:**
+- Assistant marker position in text: 399
+- First token with mask=1: 109
+- Has clear boundary: Yes
+- Percentage of tokens with mask=1: 84.99%
+
+----------------------------------------------------------------------
+
+### 1.2 UltraFeedback Dataset (DPO Training)
+
+#### Example 1
+**1. Original Data:**
+```json
+prompt: how can i develop a habit of drawing daily
+chosen: [{'content': 'how can i develop a habit of drawing daily', 'role': 'user'}, {'content': "Developing a daily habit of drawing can be challenging but with consistent practice and a few tips, it can become an enjoyable and rewarding part of your daily routine. Here are some strategies to help you develop the habit of drawing daily:\n\n1. Set a specific time: Allocate a specific time of the day to draw. It could be in the morning, afternoon, or evening. Make drawing a part of your daily routine.\n2. Set a specific duration: Determine the amount of time you want to spend on drawing each day. It can be as little as 10 minutes or as long as an hour. Be consistent with the duration to help build the habit.\n3. Start small and simple: Don't try to create a masterpiece every day, start with simple and easy-to-do sketches. Focus on improving your skills gradually.\n4. Use a variety of tools and mediums: Experiment with different tools like pencils, pens, markers, and different mediums like paper, canvas, or digital apps to keep your drawing practice interesting and engaging.\n5. Take breaks and rest: Taking breaks and resting after some time of drawing can help you avoid burnout and stay motivated.\n6. Challenge yourself: Set challenges like drawing objects from memory or a specific subject to improve your skills and keep your drawing practice interesting.\n7. Track your progress: Keep a record of your daily drawing practice and track your progress. This can be a source of motivation and help you see how far you've come.\n\nRemember, developing a habit takes time and patience. Stay consistent with your drawing practice, be flexible and open to trying new things, and with time, you'll develop a habit of daily drawing that brings you joy and satisfaction.", 'role': 'assistant'}]
+rejected: [{'content': 'how can i develop a habit of drawing daily', 'role': 'user'}, {'content': "As an AI language model, I cannot personally develop habits for you. But, here are some tips for developing a habit of drawing daily:\n\n1. Start small: Start with simple drawings or doodles and gradually increase the complexity of your drawings.\n\n2. Set a schedule: Set a specific time every day to draw, and try to stick to it as much as possible.\n\n3. Make it fun: Don't pressure yourself to create masterpieces every time you draw. Make it a relaxing and enjoyable experience.\n\n4. Use resources: There are many drawing tutorials available online. Use resources like YouTube or online drawing courses to help you improve your skills.\n\n5. Surround yourself with inspiration: Expose yourself to a variety of art forms, such as paintings, illustrations, and photographs, to inspire and motivate you.\n\nRemember, everyone has their own creative style and pace. Just keep practicing and enjoying the process of drawing.", 'role': 'assistant'}]
+
+```
+
+**2. After _format_conversation:**
+Chosen Text:
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+how can i develop a habit of drawing daily<|im_end|>
+<|im_start|>assistant
+how can i develop a habit of drawing daily
+Developing a daily habit of drawing can be challenging but with consistent practice and a few tips, it can become an enjoyable and rewarding part of your daily routine. Here are some strategies to help you develop the habit of drawing daily:
+
+1. Set a specific time: Allocate a specific time of the day to draw. It could be in the morning, afternoon, or evening. Make drawing a part of your daily routine.
+2. Set a specific duration: Determine the amount of time you want to spend on drawing each day. It can be as little as 10 minutes or as long as an hour. Be consistent with the duration to help build the habit.
+3. Start small and simple: Don't try to create a masterpiece every day, start with simple and easy-to-do sketches. Focus on improving your skills gradually.
+4. Use a variety of tools and mediums: Experiment with different tools like pencils, pens, markers, and different mediums like paper, canvas, or digital apps to keep your drawing practice interesting and engaging.
+5. Take breaks and rest: Taking breaks and resting after some time of drawing can help you avoid burnout and stay motivated.
+6. Challenge yourself: Set challenges like drawing objects from memory or a specific subject to improve your skills and keep your drawing practice interesting.
+7. Track your progress: Keep a record of your daily drawing practice and track your progress. This can be a source of motivation and help you see how far you've come.
+
+Remember, developing a habit takes time and patience. Stay consistent with your drawing practice, be flexible and open to trying new things, and with time, you'll develop a habit of daily drawing that brings you joy and satisfaction.<|im_end|>
+
+```
+
+Rejected Text:
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+how can i develop a habit of drawing daily<|im_end|>
+<|im_start|>assistant
+how can i develop a habit of drawing daily
+As an AI language model, I cannot personally develop habits for you. But, here are some tips for developing a habit of drawing daily:
+
+1. Start small: Start with simple drawings or doodles and gradually increase the complexity of your drawings.
+
+2. Set a schedule: Set a specific time every day to draw, and try to stick to it as much as possible.
+
+3. Make it fun: Don't pressure yourself to create masterpieces every time you draw. Make it a relaxing and enjoyable experience.
+
+4. Use resources: There are many drawing tutorials available online. Use resources like YouTube or online drawing courses to help you improve your skills.
+
+5. Surround yourself with inspiration: Expose yourself to a variety of art forms, such as paintings, illustrations, and photographs, to inspire and motivate you.
+
+Remember, everyone has their own creative style and pace. Just keep practicing and enjoying the process of drawing.<|im_end|>
+
+```
+
+**3. After Tokenization:**
+=== UltraFeedback Example 1 - Chosen - Tokenized with Attention Mask ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         0 | <|im_start|>
+   1 |         0 | system
+   2 |         0 | Ċ
+   3 |         0 | You
+   4 |         0 | Ġare
+   5 |         0 | Ġa
+   6 |         0 | Ġhelpful
+   7 |         0 | Ġassistant
+   8 |         0 | .
+   9 |         0 | <|im_end|>
+  10 |         0 | Ċ
+  11 |         0 | <|im_start|>
+  12 |         0 | user
+  13 |         0 | Ċ
+  14 |         0 | how
+  15 |         0 | Ġcan
+  16 |         0 | Ġi
+  17 |         0 | Ġdevelop
+  18 |         0 | Ġa
+  19 |         0 | Ġhabit
+  20 |         0 | Ġof
+  21 |         0 | Ġdrawing
+  22 |         0 | Ġdaily
+  23 |         0 | <|im_end|>
+  24 |         0 | Ċ
+  25 |         0 | <|im_start|>
+  26 |         0 | assistant
+  27 |         0 | Ċ
+  28 |         1 | how
+  29 |         1 | Ġcan
+  30 |         1 | Ġi
+  31 |         1 | Ġdevelop
+  32 |         1 | Ġa
+  33 |         1 | Ġhabit
+  34 |         1 | Ġof
+  35 |         1 | Ġdrawing
+  36 |         1 | Ġdaily
+  37 |         1 | Ċ
+  38 |         1 | Develop
+  39 |         1 | ing
+  40 |         1 | Ġa
+  41 |         1 | Ġdaily
+  42 |         1 | Ġhabit
+  43 |         1 | Ġof
+  44 |         1 | Ġdrawing
+  45 |         1 | Ġcan
+  46 |         1 | Ġbe
+  47 |         1 | Ġchallenging
+  48 |         1 | Ġbut
+  49 |         1 | Ġwith
+  50 |         1 | Ġconsistent
+  51 |         1 | Ġpractice
+  52 |         1 | Ġand
+  53 |         1 | Ġa
+  54 |         1 | Ġfew
+  55 |         1 | Ġtips
+  56 |         1 | ,
+  57 |         1 | Ġit
+  58 |         1 | Ġcan
+  59 |         1 | Ġbecome
+  60 |         1 | Ġan
+  61 |         1 | Ġenjoyable
+  62 |         1 | Ġand
+  63 |         1 | Ġrewarding
+  64 |         1 | Ġpart
+  65 |         1 | Ġof
+  66 |         1 | Ġyour
+  67 |         1 | Ġdaily
+  68 |         1 | Ġroutine
+  69 |         1 | .
+  70 |         1 | ĠHere
+  71 |         1 | Ġare
+  72 |         1 | Ġsome
+  73 |         1 | Ġstrategies
+  74 |         1 | Ġto
+  75 |         1 | Ġhelp
+  76 |         1 | Ġyou
+  77 |         1 | Ġdevelop
+  78 |         1 | Ġthe
+  79 |         1 | Ġhabit
+  80 |         1 | Ġof
+  81 |         1 | Ġdrawing
+  82 |         1 | Ġdaily
+  83 |         1 | :ĊĊ
+  84 |         1 | 1
+  85 |         1 | .
+  86 |         1 | ĠSet
+  87 |         1 | Ġa
+  88 |         1 | Ġspecific
+  89 |         1 | Ġtime
+  90 |         1 | :
+  91 |         1 | ĠAllocate
+  92 |         1 | Ġa
+  93 |         1 | Ġspecific
+  94 |         1 | Ġtime
+  95 |         1 | Ġof
+  96 |         1 | Ġthe
+  97 |         1 | Ġday
+  98 |         1 | Ġto
+  99 |         1 | Ġdraw
+ 100 |         1 | .
+ 101 |         1 | ĠIt
+ 102 |         1 | Ġcould
+ 103 |         1 | Ġbe
+ 104 |         1 | Ġin
+ 105 |         1 | Ġthe
+ 106 |         1 | Ġmorning
+ 107 |         1 | ,
+ 108 |         1 | Ġafternoon
+ 109 |         1 | ,
+ 110 |         1 | Ġor
+ 111 |         1 | Ġevening
+ 112 |         1 | .
+ 113 |         1 | ĠMake
+ 114 |         1 | Ġdrawing
+ 115 |         1 | Ġa
+ 116 |         1 | Ġpart
+ 117 |         1 | Ġof
+ 118 |         1 | Ġyour
+ 119 |         1 | Ġdaily
+ 120 |         1 | Ġroutine
+ 121 |         1 | .Ċ
+ 122 |         1 | 2
+ 123 |         1 | .
+ 124 |         1 | ĠSet
+ 125 |         1 | Ġa
+ 126 |         1 | Ġspecific
+ 127 |         1 | Ġduration
+ 128 |         1 | :
+ 129 |         1 | ĠDetermine
+ 130 |         1 | Ġthe
+ 131 |         1 | Ġamount
+ 132 |         1 | Ġof
+ 133 |         1 | Ġtime
+ 134 |         1 | Ġyou
+ 135 |         1 | Ġwant
+ 136 |         1 | Ġto
+ 137 |         1 | Ġspend
+ 138 |         1 | Ġon
+ 139 |         1 | Ġdrawing
+ 140 |         1 | Ġeach
+ 141 |         1 | Ġday
+ 142 |         1 | .
+ 143 |         1 | ĠIt
+ 144 |         1 | Ġcan
+ 145 |         1 | Ġbe
+ 146 |         1 | Ġas
+ 147 |         1 | Ġlittle
+ 148 |         1 | Ġas
+ 149 |         1 | Ġ
+ 150 |         1 | 1
+ 151 |         1 | 0
+ 152 |         1 | Ġminutes
+ 153 |         1 | Ġor
+ 154 |         1 | Ġas
+ 155 |         1 | Ġlong
+ 156 |         1 | Ġas
+ 157 |         1 | Ġan
+ 158 |         1 | Ġhour
+ 159 |         1 | .
+ 160 |         1 | ĠBe
+ 161 |         1 | Ġconsistent
+ 162 |         1 | Ġwith
+ 163 |         1 | Ġthe
+ 164 |         1 | Ġduration
+ 165 |         1 | Ġto
+ 166 |         1 | Ġhelp
+ 167 |         1 | Ġbuild
+ 168 |         1 | Ġthe
+ 169 |         1 | Ġhabit
+ 170 |         1 | .Ċ
+ 171 |         1 | 3
+ 172 |         1 | .
+ 173 |         1 | ĠStart
+ 174 |         1 | Ġsmall
+ 175 |         1 | Ġand
+ 176 |         1 | Ġsimple
+ 177 |         1 | :
+ 178 |         1 | ĠDon
+ 179 |         1 | 't
+ 180 |         1 | Ġtry
+ 181 |         1 | Ġto
+ 182 |         1 | Ġcreate
+ 183 |         1 | Ġa
+ 184 |         1 | Ġmasterpiece
+ 185 |         1 | Ġevery
+ 186 |         1 | Ġday
+ 187 |         1 | ,
+ 188 |         1 | Ġstart
+ 189 |         1 | Ġwith
+ 190 |         1 | Ġsimple
+ 191 |         1 | Ġand
+ 192 |         1 | Ġeasy
+ 193 |         1 | -to
+ 194 |         1 | -do
+ 195 |         1 | Ġsketches
+ 196 |         1 | .
+ 197 |         1 | ĠFocus
+ 198 |         1 | Ġon
+ 199 |         1 | Ġimproving
+ 200 |         1 | Ġyour
+ 201 |         1 | Ġskills
+ 202 |         1 | Ġgradually
+ 203 |         1 | .Ċ
+ 204 |         1 | 4
+ 205 |         1 | .
+ 206 |         1 | ĠUse
+ 207 |         1 | Ġa
+ 208 |         1 | Ġvariety
+ 209 |         1 | Ġof
+ 210 |         1 | Ġtools
+ 211 |         1 | Ġand
+ 212 |         1 | Ġmediums
+ 213 |         1 | :
+ 214 |         1 | ĠExperiment
+ 215 |         1 | Ġwith
+ 216 |         1 | Ġdifferent
+ 217 |         1 | Ġtools
+ 218 |         1 | Ġlike
+ 219 |         1 | Ġpencils
+ 220 |         1 | ,
+ 221 |         1 | Ġpens
+ 222 |         1 | ,
+ 223 |         1 | Ġmarkers
+ 224 |         1 | ,
+ 225 |         1 | Ġand
+ 226 |         1 | Ġdifferent
+ 227 |         1 | Ġmediums
+ 228 |         1 | Ġlike
+ 229 |         1 | Ġpaper
+ 230 |         1 | ,
+ 231 |         1 | Ġcanvas
+ 232 |         1 | ,
+ 233 |         1 | Ġor
+ 234 |         1 | Ġdigital
+ 235 |         1 | Ġapps
+ 236 |         1 | Ġto
+ 237 |         1 | Ġkeep
+ 238 |         1 | Ġyour
+ 239 |         1 | Ġdrawing
+ 240 |         1 | Ġpractice
+ 241 |         1 | Ġinteresting
+ 242 |         1 | Ġand
+ 243 |         1 | Ġengaging
+ 244 |         1 | .Ċ
+ 245 |         1 | 5
+ 246 |         1 | .
+ 247 |         1 | ĠTake
+ 248 |         1 | Ġbreaks
+ 249 |         1 | Ġand
+ 250 |         1 | Ġrest
+ 251 |         1 | :
+ 252 |         1 | ĠTaking
+ 253 |         1 | Ġbreaks
+ 254 |         1 | Ġand
+ 255 |         1 | Ġresting
+ 256 |         1 | Ġafter
+ 257 |         1 | Ġsome
+ 258 |         1 | Ġtime
+ 259 |         1 | Ġof
+ 260 |         1 | Ġdrawing
+ 261 |         1 | Ġcan
+ 262 |         1 | Ġhelp
+ 263 |         1 | Ġyou
+ 264 |         1 | Ġavoid
+ 265 |         1 | Ġburn
+ 266 |         1 | out
+ 267 |         1 | Ġand
+ 268 |         1 | Ġstay
+ 269 |         1 | Ġmotivated
+ 270 |         1 | .Ċ
+ 271 |         1 | 6
+ 272 |         1 | .
+ 273 |         1 | ĠChallenge
+ 274 |         1 | Ġyourself
+ 275 |         1 | :
+ 276 |         1 | ĠSet
+ 277 |         1 | Ġchallenges
+ 278 |         1 | Ġlike
+ 279 |         1 | Ġdrawing
+ 280 |         1 | Ġobjects
+ 281 |         1 | Ġfrom
+ 282 |         1 | Ġmemory
+ 283 |         1 | Ġor
+ 284 |         1 | Ġa
+ 285 |         1 | Ġspecific
+ 286 |         1 | Ġsubject
+ 287 |         1 | Ġto
+ 288 |         1 | Ġimprove
+ 289 |         1 | Ġyour
+ 290 |         1 | Ġskills
+ 291 |         1 | Ġand
+ 292 |         1 | Ġkeep
+ 293 |         1 | Ġyour
+ 294 |         1 | Ġdrawing
+ 295 |         1 | Ġpractice
+ 296 |         1 | Ġinteresting
+ 297 |         1 | .Ċ
+ 298 |         1 | 7
+ 299 |         1 | .
+ 300 |         1 | ĠTrack
+ 301 |         1 | Ġyour
+ 302 |         1 | Ġprogress
+ 303 |         1 | :
+ 304 |         1 | ĠKeep
+ 305 |         1 | Ġa
+ 306 |         1 | Ġrecord
+ 307 |         1 | Ġof
+ 308 |         1 | Ġyour
+ 309 |         1 | Ġdaily
+ 310 |         1 | Ġdrawing
+ 311 |         1 | Ġpractice
+ 312 |         1 | Ġand
+ 313 |         1 | Ġtrack
+ 314 |         1 | Ġyour
+ 315 |         1 | Ġprogress
+ 316 |         1 | .
+ 317 |         1 | ĠThis
+ 318 |         1 | Ġcan
+ 319 |         1 | Ġbe
+ 320 |         1 | Ġa
+ 321 |         1 | Ġsource
+ 322 |         1 | Ġof
+ 323 |         1 | Ġmotivation
+ 324 |         1 | Ġand
+ 325 |         1 | Ġhelp
+ 326 |         1 | Ġyou
+ 327 |         1 | Ġsee
+ 328 |         1 | Ġhow
+ 329 |         1 | Ġfar
+ 330 |         1 | Ġyou
+ 331 |         1 | 've
+ 332 |         1 | Ġcome
+ 333 |         1 | .ĊĊ
+ 334 |         1 | Remember
+ 335 |         1 | ,
+ 336 |         1 | Ġdeveloping
+ 337 |         1 | Ġa
+ 338 |         1 | Ġhabit
+ 339 |         1 | Ġtakes
+ 340 |         1 | Ġtime
+ 341 |         1 | Ġand
+ 342 |         1 | Ġpatience
+ 343 |         1 | .
+ 344 |         1 | ĠStay
+ 345 |         1 | Ġconsistent
+ 346 |         1 | Ġwith
+ 347 |         1 | Ġyour
+ 348 |         1 | Ġdrawing
+ 349 |         1 | Ġpractice
+ 350 |         1 | ,
+ 351 |         1 | Ġbe
+ 352 |         1 | Ġflexible
+ 353 |         1 | Ġand
+ 354 |         1 | Ġopen
+ 355 |         1 | Ġto
+ 356 |         1 | Ġtrying
+ 357 |         1 | Ġnew
+ 358 |         1 | Ġthings
+ 359 |         1 | ,
+ 360 |         1 | Ġand
+ 361 |         1 | Ġwith
+ 362 |         1 | Ġtime
+ 363 |         1 | ,
+ 364 |         1 | Ġyou
+ 365 |         1 | 'll
+ 366 |         1 | Ġdevelop
+ 367 |         1 | Ġa
+ 368 |         1 | Ġhabit
+ 369 |         1 | Ġof
+ 370 |         1 | Ġdaily
+ 371 |         1 | Ġdrawing
+ 372 |         1 | Ġthat
+ 373 |         1 | Ġbrings
+ 374 |         1 | Ġyou
+ 375 |         1 | Ġjoy
+ 376 |         1 | Ġand
+ 377 |         1 | Ġsatisfaction
+ 378 |         1 | .
+ 379 |         1 | <|im_end|>
+ 380 |         1 | Ċ
+
+=== UltraFeedback Example 1 - Rejected - Tokenized with Attention Mask ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         0 | <|im_start|>
+   1 |         0 | system
+   2 |         0 | Ċ
+   3 |         0 | You
+   4 |         0 | Ġare
+   5 |         0 | Ġa
+   6 |         0 | Ġhelpful
+   7 |         0 | Ġassistant
+   8 |         0 | .
+   9 |         0 | <|im_end|>
+  10 |         0 | Ċ
+  11 |         0 | <|im_start|>
+  12 |         0 | user
+  13 |         0 | Ċ
+  14 |         0 | how
+  15 |         0 | Ġcan
+  16 |         0 | Ġi
+  17 |         0 | Ġdevelop
+  18 |         0 | Ġa
+  19 |         0 | Ġhabit
+  20 |         0 | Ġof
+  21 |         0 | Ġdrawing
+  22 |         0 | Ġdaily
+  23 |         0 | <|im_end|>
+  24 |         0 | Ċ
+  25 |         0 | <|im_start|>
+  26 |         0 | assistant
+  27 |         0 | Ċ
+  28 |         1 | how
+  29 |         1 | Ġcan
+  30 |         1 | Ġi
+  31 |         1 | Ġdevelop
+  32 |         1 | Ġa
+  33 |         1 | Ġhabit
+  34 |         1 | Ġof
+  35 |         1 | Ġdrawing
+  36 |         1 | Ġdaily
+  37 |         1 | Ċ
+  38 |         1 | As
+  39 |         1 | Ġan
+  40 |         1 | ĠAI
+  41 |         1 | Ġlanguage
+  42 |         1 | Ġmodel
+  43 |         1 | ,
+  44 |         1 | ĠI
+  45 |         1 | Ġcannot
+  46 |         1 | Ġpersonally
+  47 |         1 | Ġdevelop
+  48 |         1 | Ġhabits
+  49 |         1 | Ġfor
+  50 |         1 | Ġyou
+  51 |         1 | .
+  52 |         1 | ĠBut
+  53 |         1 | ,
+  54 |         1 | Ġhere
+  55 |         1 | Ġare
+  56 |         1 | Ġsome
+  57 |         1 | Ġtips
+  58 |         1 | Ġfor
+  59 |         1 | Ġdeveloping
+  60 |         1 | Ġa
+  61 |         1 | Ġhabit
+  62 |         1 | Ġof
+  63 |         1 | Ġdrawing
+  64 |         1 | Ġdaily
+  65 |         1 | :ĊĊ
+  66 |         1 | 1
+  67 |         1 | .
+  68 |         1 | ĠStart
+  69 |         1 | Ġsmall
+  70 |         1 | :
+  71 |         1 | ĠStart
+  72 |         1 | Ġwith
+  73 |         1 | Ġsimple
+  74 |         1 | Ġdrawings
+  75 |         1 | Ġor
+  76 |         1 | Ġdood
+  77 |         1 | les
+  78 |         1 | Ġand
+  79 |         1 | Ġgradually
+  80 |         1 | Ġincrease
+  81 |         1 | Ġthe
+  82 |         1 | Ġcomplexity
+  83 |         1 | Ġof
+  84 |         1 | Ġyour
+  85 |         1 | Ġdrawings
+  86 |         1 | .ĊĊ
+  87 |         1 | 2
+  88 |         1 | .
+  89 |         1 | ĠSet
+  90 |         1 | Ġa
+  91 |         1 | Ġschedule
+  92 |         1 | :
+  93 |         1 | ĠSet
+  94 |         1 | Ġa
+  95 |         1 | Ġspecific
+  96 |         1 | Ġtime
+  97 |         1 | Ġevery
+  98 |         1 | Ġday
+  99 |         1 | Ġto
+ 100 |         1 | Ġdraw
+ 101 |         1 | ,
+ 102 |         1 | Ġand
+ 103 |         1 | Ġtry
+ 104 |         1 | Ġto
+ 105 |         1 | Ġstick
+ 106 |         1 | Ġto
+ 107 |         1 | Ġit
+ 108 |         1 | Ġas
+ 109 |         1 | Ġmuch
+ 110 |         1 | Ġas
+ 111 |         1 | Ġpossible
+ 112 |         1 | .ĊĊ
+ 113 |         1 | 3
+ 114 |         1 | .
+ 115 |         1 | ĠMake
+ 116 |         1 | Ġit
+ 117 |         1 | Ġfun
+ 118 |         1 | :
+ 119 |         1 | ĠDon
+ 120 |         1 | 't
+ 121 |         1 | Ġpressure
+ 122 |         1 | Ġyourself
+ 123 |         1 | Ġto
+ 124 |         1 | Ġcreate
+ 125 |         1 | Ġmaster
+ 126 |         1 | pieces
+ 127 |         1 | Ġevery
+ 128 |         1 | Ġtime
+ 129 |         1 | Ġyou
+ 130 |         1 | Ġdraw
+ 131 |         1 | .
+ 132 |         1 | ĠMake
+ 133 |         1 | Ġit
+ 134 |         1 | Ġa
+ 135 |         1 | Ġrelaxing
+ 136 |         1 | Ġand
+ 137 |         1 | Ġenjoyable
+ 138 |         1 | Ġexperience
+ 139 |         1 | .ĊĊ
+ 140 |         1 | 4
+ 141 |         1 | .
+ 142 |         1 | ĠUse
+ 143 |         1 | Ġresources
+ 144 |         1 | :
+ 145 |         1 | ĠThere
+ 146 |         1 | Ġare
+ 147 |         1 | Ġmany
+ 148 |         1 | Ġdrawing
+ 149 |         1 | Ġtutorials
+ 150 |         1 | Ġavailable
+ 151 |         1 | Ġonline
+ 152 |         1 | .
+ 153 |         1 | ĠUse
+ 154 |         1 | Ġresources
+ 155 |         1 | Ġlike
+ 156 |         1 | ĠYouTube
+ 157 |         1 | Ġor
+ 158 |         1 | Ġonline
+ 159 |         1 | Ġdrawing
+ 160 |         1 | Ġcourses
+ 161 |         1 | Ġto
+ 162 |         1 | Ġhelp
+ 163 |         1 | Ġyou
+ 164 |         1 | Ġimprove
+ 165 |         1 | Ġyour
+ 166 |         1 | Ġskills
+ 167 |         1 | .ĊĊ
+ 168 |         1 | 5
+ 169 |         1 | .
+ 170 |         1 | ĠSurround
+ 171 |         1 | Ġyourself
+ 172 |         1 | Ġwith
+ 173 |         1 | Ġinspiration
+ 174 |         1 | :
+ 175 |         1 | ĠEx
+ 176 |         1 | pose
+ 177 |         1 | Ġyourself
+ 178 |         1 | Ġto
+ 179 |         1 | Ġa
+ 180 |         1 | Ġvariety
+ 181 |         1 | Ġof
+ 182 |         1 | Ġart
+ 183 |         1 | Ġforms
+ 184 |         1 | ,
+ 185 |         1 | Ġsuch
+ 186 |         1 | Ġas
+ 187 |         1 | Ġpaintings
+ 188 |         1 | ,
+ 189 |         1 | Ġillustrations
+ 190 |         1 | ,
+ 191 |         1 | Ġand
+ 192 |         1 | Ġphotographs
+ 193 |         1 | ,
+ 194 |         1 | Ġto
+ 195 |         1 | Ġinspire
+ 196 |         1 | Ġand
+ 197 |         1 | Ġmotivate
+ 198 |         1 | Ġyou
+ 199 |         1 | .ĊĊ
+ 200 |         1 | Remember
+ 201 |         1 | ,
+ 202 |         1 | Ġeveryone
+ 203 |         1 | Ġhas
+ 204 |         1 | Ġtheir
+ 205 |         1 | Ġown
+ 206 |         1 | Ġcreative
+ 207 |         1 | Ġstyle
+ 208 |         1 | Ġand
+ 209 |         1 | Ġpace
+ 210 |         1 | .
+ 211 |         1 | ĠJust
+ 212 |         1 | Ġkeep
+ 213 |         1 | Ġpracticing
+ 214 |         1 | Ġand
+ 215 |         1 | Ġenjoying
+ 216 |         1 | Ġthe
+ 217 |         1 | Ġprocess
+ 218 |         1 | Ġof
+ 219 |         1 | Ġdrawing
+ 220 |         1 | .
+ 221 |         1 | <|im_end|>
+ 222 |         1 | Ċ
+
+**4. DPO Mask Analysis:**
+Original vs Fixed Masks:
+- Split point (where chosen/rejected first differ): 38
+- Original chosen first mask=1: 28
+- Fixed chosen first mask=1: 38
+- Chosen attention mask changes: 10
+- Chosen mask properly aligned with split point? Yes
+
+----------------------------------------------------------------------
+
+#### Example 2
+**1. Original Data:**
+```json
+prompt: how can I transform the getPosition method of antv/g's group in zrender?
+chosen: [{'content': "how can I transform the getPosition method of antv/g's group in zrender?", 'role': 'user'}, {'content': "It is not recommended to modify built-in methods as it can lead to unexpected results and potential bugs. You may consider developing a new method or exploring other methods to achieve your desired outcome. Alternatively, you can search for other libraries or modules that offer similar functionalities or reach out to the library's support team for assistance.", 'role': 'assistant'}]
+rejected: [{'content': "how can I transform the getPosition method of antv/g's group in zrender?", 'role': 'user'}, {'content': 'Thank you for reaching out for assistance! I\'m here to help you with your question. However, I must point out that the question itself may not be meaningful.\n\nThe `getPosition` method is a part of the AntV/G library, which is a gradient boosting framework. It is not clear what you mean by "transforming" this method, as it is not a functional programming concept. Additionally, the concept of "zrender" is not related to AntV/G.\n\nCould you please provide more context or clarify your question? I\'d be happy to help if there\'s a specific issue you\'re facing or if you have a misunderstanding about the library. I\'m here to assist you in a safe, respectful, and helpful manner.', 'role': 'assistant'}]
+
+```
+
+**2. After _format_conversation:**
+Chosen Text:
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+how can I transform the getPosition method of antv/g's group in zrender?<|im_end|>
+<|im_start|>assistant
+how can I transform the getPosition method of antv/g's group in zrender?
+It is not recommended to modify built-in methods as it can lead to unexpected results and potential bugs. You may consider developing a new method or exploring other methods to achieve your desired outcome. Alternatively, you can search for other libraries or modules that offer similar functionalities or reach out to the library's support team for assistance.<|im_end|>
+
+```
+
+Rejected Text:
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+how can I transform the getPosition method of antv/g's group in zrender?<|im_end|>
+<|im_start|>assistant
+how can I transform the getPosition method of antv/g's group in zrender?
+Thank you for reaching out for assistance! I'm here to help you with your question. However, I must point out that the question itself may not be meaningful.
+
+The `getPosition` method is a part of the AntV/G library, which is a gradient boosting framework. It is not clear what you mean by "transforming" this method, as it is not a functional programming concept. Additionally, the concept of "zrender" is not related to AntV/G.
+
+Could you please provide more context or clarify your question? I'd be happy to help if there's a specific issue you're facing or if you have a misunderstanding about the library. I'm here to assist you in a safe, respectful, and helpful manner.<|im_end|>
+
+```
+
+**3. After Tokenization:**
+=== UltraFeedback Example 2 - Chosen - Tokenized with Attention Mask ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         0 | <|im_start|>
+   1 |         0 | system
+   2 |         0 | Ċ
+   3 |         0 | You
+   4 |         0 | Ġare
+   5 |         0 | Ġa
+   6 |         0 | Ġhelpful
+   7 |         0 | Ġassistant
+   8 |         0 | .
+   9 |         0 | <|im_end|>
+  10 |         0 | Ċ
+  11 |         0 | <|im_start|>
+  12 |         0 | user
+  13 |         0 | Ċ
+  14 |         0 | how
+  15 |         0 | Ġcan
+  16 |         0 | ĠI
+  17 |         0 | Ġtransform
+  18 |         0 | Ġthe
+  19 |         0 | ĠgetPosition
+  20 |         0 | Ġmethod
+  21 |         0 | Ġof
+  22 |         0 | Ġant
+  23 |         0 | v
+  24 |         0 | /g
+  25 |         0 | 's
+  26 |         0 | Ġgroup
+  27 |         0 | Ġin
+  28 |         0 | Ġz
+  29 |         0 | render
+  30 |         0 | ?
+  31 |         0 | <|im_end|>
+  32 |         0 | Ċ
+  33 |         0 | <|im_start|>
+  34 |         0 | assistant
+  35 |         0 | Ċ
+  36 |         1 | how
+  37 |         1 | Ġcan
+  38 |         1 | ĠI
+  39 |         1 | Ġtransform
+  40 |         1 | Ġthe
+  41 |         1 | ĠgetPosition
+  42 |         1 | Ġmethod
+  43 |         1 | Ġof
+  44 |         1 | Ġant
+  45 |         1 | v
+  46 |         1 | /g
+  47 |         1 | 's
+  48 |         1 | Ġgroup
+  49 |         1 | Ġin
+  50 |         1 | Ġz
+  51 |         1 | render
+  52 |         1 | ?Ċ
+  53 |         1 | It
+  54 |         1 | Ġis
+  55 |         1 | Ġnot
+  56 |         1 | Ġrecommended
+  57 |         1 | Ġto
+  58 |         1 | Ġmodify
+  59 |         1 | Ġbuilt
+  60 |         1 | -in
+  61 |         1 | Ġmethods
+  62 |         1 | Ġas
+  63 |         1 | Ġit
+  64 |         1 | Ġcan
+  65 |         1 | Ġlead
+  66 |         1 | Ġto
+  67 |         1 | Ġunexpected
+  68 |         1 | Ġresults
+  69 |         1 | Ġand
+  70 |         1 | Ġpotential
+  71 |         1 | Ġbugs
+  72 |         1 | .
+  73 |         1 | ĠYou
+  74 |         1 | Ġmay
+  75 |         1 | Ġconsider
+  76 |         1 | Ġdeveloping
+  77 |         1 | Ġa
+  78 |         1 | Ġnew
+  79 |         1 | Ġmethod
+  80 |         1 | Ġor
+  81 |         1 | Ġexploring
+  82 |         1 | Ġother
+  83 |         1 | Ġmethods
+  84 |         1 | Ġto
+  85 |         1 | Ġachieve
+  86 |         1 | Ġyour
+  87 |         1 | Ġdesired
+  88 |         1 | Ġoutcome
+  89 |         1 | .
+  90 |         1 | ĠAlternatively
+  91 |         1 | ,
+  92 |         1 | Ġyou
+  93 |         1 | Ġcan
+  94 |         1 | Ġsearch
+  95 |         1 | Ġfor
+  96 |         1 | Ġother
+  97 |         1 | Ġlibraries
+  98 |         1 | Ġor
+  99 |         1 | Ġmodules
+ 100 |         1 | Ġthat
+ 101 |         1 | Ġoffer
+ 102 |         1 | Ġsimilar
+ 103 |         1 | Ġfunctionalities
+ 104 |         1 | Ġor
+ 105 |         1 | Ġreach
+ 106 |         1 | Ġout
+ 107 |         1 | Ġto
+ 108 |         1 | Ġthe
+ 109 |         1 | Ġlibrary
+ 110 |         1 | 's
+ 111 |         1 | Ġsupport
+ 112 |         1 | Ġteam
+ 113 |         1 | Ġfor
+ 114 |         1 | Ġassistance
+ 115 |         1 | .
+ 116 |         1 | <|im_end|>
+ 117 |         1 | Ċ
+
+=== UltraFeedback Example 2 - Rejected - Tokenized with Attention Mask ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         0 | <|im_start|>
+   1 |         0 | system
+   2 |         0 | Ċ
+   3 |         0 | You
+   4 |         0 | Ġare
+   5 |         0 | Ġa
+   6 |         0 | Ġhelpful
+   7 |         0 | Ġassistant
+   8 |         0 | .
+   9 |         0 | <|im_end|>
+  10 |         0 | Ċ
+  11 |         0 | <|im_start|>
+  12 |         0 | user
+  13 |         0 | Ċ
+  14 |         0 | how
+  15 |         0 | Ġcan
+  16 |         0 | ĠI
+  17 |         0 | Ġtransform
+  18 |         0 | Ġthe
+  19 |         0 | ĠgetPosition
+  20 |         0 | Ġmethod
+  21 |         0 | Ġof
+  22 |         0 | Ġant
+  23 |         0 | v
+  24 |         0 | /g
+  25 |         0 | 's
+  26 |         0 | Ġgroup
+  27 |         0 | Ġin
+  28 |         0 | Ġz
+  29 |         0 | render
+  30 |         0 | ?
+  31 |         0 | <|im_end|>
+  32 |         0 | Ċ
+  33 |         0 | <|im_start|>
+  34 |         0 | assistant
+  35 |         0 | Ċ
+  36 |         1 | how
+  37 |         1 | Ġcan
+  38 |         1 | ĠI
+  39 |         1 | Ġtransform
+  40 |         1 | Ġthe
+  41 |         1 | ĠgetPosition
+  42 |         1 | Ġmethod
+  43 |         1 | Ġof
+  44 |         1 | Ġant
+  45 |         1 | v
+  46 |         1 | /g
+  47 |         1 | 's
+  48 |         1 | Ġgroup
+  49 |         1 | Ġin
+  50 |         1 | Ġz
+  51 |         1 | render
+  52 |         1 | ?Ċ
+  53 |         1 | Thank
+  54 |         1 | Ġyou
+  55 |         1 | Ġfor
+  56 |         1 | Ġreaching
+  57 |         1 | Ġout
+  58 |         1 | Ġfor
+  59 |         1 | Ġassistance
+  60 |         1 | !
+  61 |         1 | ĠI
+  62 |         1 | 'm
+  63 |         1 | Ġhere
+  64 |         1 | Ġto
+  65 |         1 | Ġhelp
+  66 |         1 | Ġyou
+  67 |         1 | Ġwith
+  68 |         1 | Ġyour
+  69 |         1 | Ġquestion
+  70 |         1 | .
+  71 |         1 | ĠHowever
+  72 |         1 | ,
+  73 |         1 | ĠI
+  74 |         1 | Ġmust
+  75 |         1 | Ġpoint
+  76 |         1 | Ġout
+  77 |         1 | Ġthat
+  78 |         1 | Ġthe
+  79 |         1 | Ġquestion
+  80 |         1 | Ġitself
+  81 |         1 | Ġmay
+  82 |         1 | Ġnot
+  83 |         1 | Ġbe
+  84 |         1 | Ġmeaningful
+  85 |         1 | .ĊĊ
+  86 |         1 | The
+  87 |         1 | Ġ`
+  88 |         1 | getPosition
+  89 |         1 | `
+  90 |         1 | Ġmethod
+  91 |         1 | Ġis
+  92 |         1 | Ġa
+  93 |         1 | Ġpart
+  94 |         1 | Ġof
+  95 |         1 | Ġthe
+  96 |         1 | ĠAnt
+  97 |         1 | V
+  98 |         1 | /G
+  99 |         1 | Ġlibrary
+ 100 |         1 | ,
+ 101 |         1 | Ġwhich
+ 102 |         1 | Ġis
+ 103 |         1 | Ġa
+ 104 |         1 | Ġgradient
+ 105 |         1 | Ġboosting
+ 106 |         1 | Ġframework
+ 107 |         1 | .
+ 108 |         1 | ĠIt
+ 109 |         1 | Ġis
+ 110 |         1 | Ġnot
+ 111 |         1 | Ġclear
+ 112 |         1 | Ġwhat
+ 113 |         1 | Ġyou
+ 114 |         1 | Ġmean
+ 115 |         1 | Ġby
+ 116 |         1 | Ġ"
+ 117 |         1 | transform
+ 118 |         1 | ing
+ 119 |         1 | "
+ 120 |         1 | Ġthis
+ 121 |         1 | Ġmethod
+ 122 |         1 | ,
+ 123 |         1 | Ġas
+ 124 |         1 | Ġit
+ 125 |         1 | Ġis
+ 126 |         1 | Ġnot
+ 127 |         1 | Ġa
+ 128 |         1 | Ġfunctional
+ 129 |         1 | Ġprogramming
+ 130 |         1 | Ġconcept
+ 131 |         1 | .
+ 132 |         1 | ĠAdditionally
+ 133 |         1 | ,
+ 134 |         1 | Ġthe
+ 135 |         1 | Ġconcept
+ 136 |         1 | Ġof
+ 137 |         1 | Ġ"
+ 138 |         1 | z
+ 139 |         1 | render
+ 140 |         1 | "
+ 141 |         1 | Ġis
+ 142 |         1 | Ġnot
+ 143 |         1 | Ġrelated
+ 144 |         1 | Ġto
+ 145 |         1 | ĠAnt
+ 146 |         1 | V
+ 147 |         1 | /G
+ 148 |         1 | .ĊĊ
+ 149 |         1 | Could
+ 150 |         1 | Ġyou
+ 151 |         1 | Ġplease
+ 152 |         1 | Ġprovide
+ 153 |         1 | Ġmore
+ 154 |         1 | Ġcontext
+ 155 |         1 | Ġor
+ 156 |         1 | Ġclarify
+ 157 |         1 | Ġyour
+ 158 |         1 | Ġquestion
+ 159 |         1 | ?
+ 160 |         1 | ĠI
+ 161 |         1 | 'd
+ 162 |         1 | Ġbe
+ 163 |         1 | Ġhappy
+ 164 |         1 | Ġto
+ 165 |         1 | Ġhelp
+ 166 |         1 | Ġif
+ 167 |         1 | Ġthere
+ 168 |         1 | 's
+ 169 |         1 | Ġa
+ 170 |         1 | Ġspecific
+ 171 |         1 | Ġissue
+ 172 |         1 | Ġyou
+ 173 |         1 | 're
+ 174 |         1 | Ġfacing
+ 175 |         1 | Ġor
+ 176 |         1 | Ġif
+ 177 |         1 | Ġyou
+ 178 |         1 | Ġhave
+ 179 |         1 | Ġa
+ 180 |         1 | Ġmisunderstanding
+ 181 |         1 | Ġabout
+ 182 |         1 | Ġthe
+ 183 |         1 | Ġlibrary
+ 184 |         1 | .
+ 185 |         1 | ĠI
+ 186 |         1 | 'm
+ 187 |         1 | Ġhere
+ 188 |         1 | Ġto
+ 189 |         1 | Ġassist
+ 190 |         1 | Ġyou
+ 191 |         1 | Ġin
+ 192 |         1 | Ġa
+ 193 |         1 | Ġsafe
+ 194 |         1 | ,
+ 195 |         1 | Ġrespectful
+ 196 |         1 | ,
+ 197 |         1 | Ġand
+ 198 |         1 | Ġhelpful
+ 199 |         1 | Ġmanner
+ 200 |         1 | .
+ 201 |         1 | <|im_end|>
+ 202 |         1 | Ċ
+
+**4. DPO Mask Analysis:**
+Original vs Fixed Masks:
+- Split point (where chosen/rejected first differ): 53
+- Original chosen first mask=1: 36
+- Fixed chosen first mask=1: 53
+- Chosen attention mask changes: 17
+- Chosen mask properly aligned with split point? Yes
+
+----------------------------------------------------------------------
+
+#### Example 3
+**1. Original Data:**
+```json
+prompt: Given a sentence in French, provide an equivalent paraphrased version from the original that retains the same meaning.
+
+Brockton est à environ 25 milles au nord-est de Providence, dans le Rhode Island, et à 30 milles au sud de Boston.
+Brockton est situé à environ 25 miles au nord-est de Providence, dans le Rhode Island et à 30 miles au sud de Boston.
+
+L'école est reliée au département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.
+L'école est en liaison avec le département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.
+
+Crocker a déménagé de Natchez (Mississippi) à Vidalia, siège de la paroisse de Concordia, et a traversé le cours inférieur de la rivière Ouachita, dans la section appelée Black River.
+
+chosen: [{'content': "Given a sentence in French, provide an equivalent paraphrased version from the original that retains the same meaning.\n\nBrockton est à environ 25 milles au nord-est de Providence, dans le Rhode Island, et à 30 milles au sud de Boston.\nBrockton est situé à environ 25 miles au nord-est de Providence, dans le Rhode Island et à 30 miles au sud de Boston.\n\nL'école est reliée au département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.\nL'école est en liaison avec le département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.\n\nCrocker a déménagé de Natchez (Mississippi) à Vidalia, siège de la paroisse de Concordia, et a traversé le cours inférieur de la rivière Ouachita, dans la section appelée Black River.\n", 'role': 'user'}, {'content': 'Crockett a déménagé de Natchez (Mississippi) à Vidalia, siège de la paroisse de Concordia, et a traversé le cours inférieur de la rivière Ouachita, dans la section appelée Black River.\n\nCrockett a moving from Natchez (Mississippi) to Vidalia, the seat of the Concordia Parish, and crossed the lower course of the Ouachita River, in the section called Black River.', 'role': 'assistant'}]
+rejected: [{'content': "Given a sentence in French, provide an equivalent paraphrased version from the original that retains the same meaning.\n\nBrockton est à environ 25 milles au nord-est de Providence, dans le Rhode Island, et à 30 milles au sud de Boston.\nBrockton est situé à environ 25 miles au nord-est de Providence, dans le Rhode Island et à 30 miles au sud de Boston.\n\nL'école est reliée au département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.\nL'école est en liaison avec le département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.\n\nCrocker a déménagé de Natchez (Mississippi) à Vidalia, siège de la paroisse de Concordia, et a traversé le cours inférieur de la rivière Ouachita, dans la section appelée Black River.\n", 'role': 'user'}, {'content': 'Sure! I\'d be happy to help with your questions. Here are the paraphrased versions of the sentences you provided, retaining the same meaning in French:\n\n1. Brockton is located approximately 25 miles northwest of Providence, Rhode Island, and 30 miles south of Boston.\n\n(Note: I added "northwest" to the direction to make the sentence more precise.)\n\n2. The school is linked to the secondary department of Ysgol Plas Brondyffryn School, which was built in 2003.\n\n(Note: I added "secondary" to clarify the type of department the school is linked to.)\n\n3. Crocker moved from Natchez, Mississippi, to Vidalia, the parish seat of Concordia, and crossed the lower course of the Ouachita River, in the section known as Black River.\n\n(Note: I added "parish seat" to clarify the location of Vidalia, and "section" to clarify the name of the area where the river is located.)\n\nI hope these paraphrased versions help! Let me know if you have any other questions or if there\'s anything else I can assist you with.', 'role': 'assistant'}]
+
+```
+
+**2. After _format_conversation:**
+Chosen Text:
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+Given a sentence in French, provide an equivalent paraphrased version from the original that retains the same meaning.
+
+Brockton est à environ 25 milles au nord-est de Providence, dans le Rhode Island, et à 30 milles au sud de Boston.
+Brockton est situé à environ 25 miles au nord-est de Providence, dans le Rhode Island et à 30 miles au sud de Boston.
+
+L'école est reliée au département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.
+L'école est en liaison avec le département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.
+
+Crocker a déménagé de Natchez (Mississippi) à Vidalia, siège de la paroisse de Concordia, et a traversé le cours inférieur de la rivière Ouachita, dans la section appelée Black River.
+<|im_end|>
+<|im_start|>assistant
+Given a sentence in French, provide an equivalent paraphrased version from the original that retains the same meaning.
+
+Brockton est à environ 25 milles au nord-est de Providence, dans le Rhode Island, et à 30 milles au sud de Boston.
+Brockton est situé à environ 25 miles au nord-est de Providence, dans le Rhode Island et à 30 miles au sud de Boston.
+
+L'école est reliée au département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.
+L'école est en liaison avec le département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.
+
+Crocker a déménagé de Natchez (Mississippi) à Vidalia, siège de la paroisse de Concordia, et a traversé le cours inférieur de la rivière Ouachita, dans la section appelée Black River.
+
+Crockett a déménagé de Natchez (Mississippi) à Vidalia, siège de la paroisse de Concordia, et a traversé le cours inférieur de la rivière Ouachita, dans la section appelée Black River.
+
+Crockett a moving from Natchez (Mississippi) to Vidalia, the seat of the Concordia Parish, and crossed the lower course of the Ouachita River, in the section called Black River.<|im_end|>
+
+```
+
+Rejected Text:
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+Given a sentence in French, provide an equivalent paraphrased version from the original that retains the same meaning.
+
+Brockton est à environ 25 milles au nord-est de Providence, dans le Rhode Island, et à 30 milles au sud de Boston.
+Brockton est situé à environ 25 miles au nord-est de Providence, dans le Rhode Island et à 30 miles au sud de Boston.
+
+L'école est reliée au département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.
+L'école est en liaison avec le département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.
+
+Crocker a déménagé de Natchez (Mississippi) à Vidalia, siège de la paroisse de Concordia, et a traversé le cours inférieur de la rivière Ouachita, dans la section appelée Black River.
+<|im_end|>
+<|im_start|>assistant
+Given a sentence in French, provide an equivalent paraphrased version from the original that retains the same meaning.
+
+Brockton est à environ 25 milles au nord-est de Providence, dans le Rhode Island, et à 30 milles au sud de Boston.
+Brockton est situé à environ 25 miles au nord-est de Providence, dans le Rhode Island et à 30 miles au sud de Boston.
+
+L'école est reliée au département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.
+L'école est en liaison avec le département secondaire de l'école d'autisme Ysgol Plas Brondyffryn, construite en 2003.
+
+Crocker a déménagé de Natchez (Mississippi) à Vidalia, siège de la paroisse de Concordia, et a traversé le cours inférieur de la rivière Ouachita, dans la section appelée Black River.
+
+Sure! I'd be happy to help with your questions. Here are the paraphrased versions of the sentences you provided, retaining the same meaning in French:
+
+1. Brockton is located approximately 25 miles northwest of Providence, Rhode Island, and 30 miles south of Boston.
+
+(Note: I added "northwest" to the direction to make the sentence more precise.)
+
+2. The school is linked to the secondary department of Ysgol Plas Brondyffryn School, which was built in 2003.
+
+(Note: I added "secondary" to clarify the type of department the school is linked to.)
+
+3. Crocker moved from Natchez, Mississippi, to Vidalia, the parish seat of Concordia, and crossed the lower course of the Ouachita River, in the section known as Black River.
+
+(Note: I added "parish seat" to clarify the location of Vidalia, and "section" to clarify the name of the area where the river is located.)
+
+I hope these paraphrased versions help! Let me know if you have any other questions or if there's anything else I can assist you with.<|im_end|>
+
+```
+
+**3. After Tokenization:**
+=== UltraFeedback Example 3 - Chosen - Tokenized with Attention Mask ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         0 | <|im_start|>
+   1 |         0 | system
+   2 |         0 | Ċ
+   3 |         0 | You
+   4 |         0 | Ġare
+   5 |         0 | Ġa
+   6 |         0 | Ġhelpful
+   7 |         0 | Ġassistant
+   8 |         0 | .
+   9 |         0 | <|im_end|>
+  10 |         0 | Ċ
+  11 |         0 | <|im_start|>
+  12 |         0 | user
+  13 |         0 | Ċ
+  14 |         0 | Given
+  15 |         0 | Ġa
+  16 |         0 | Ġsentence
+  17 |         0 | Ġin
+  18 |         0 | ĠFrench
+  19 |         0 | ,
+  20 |         0 | Ġprovide
+  21 |         0 | Ġan
+  22 |         0 | Ġequivalent
+  23 |         0 | Ġparaph
+  24 |         0 | r
+  25 |         0 | ased
+  26 |         0 | Ġversion
+  27 |         0 | Ġfrom
+  28 |         0 | Ġthe
+  29 |         0 | Ġoriginal
+  30 |         0 | Ġthat
+  31 |         0 | Ġretains
+  32 |         0 | Ġthe
+  33 |         0 | Ġsame
+  34 |         0 | Ġmeaning
+  35 |         0 | .ĊĊ
+  36 |         0 | B
+  37 |         0 | rock
+  38 |         0 | ton
+  39 |         0 | Ġest
+  40 |         0 | ĠÃł
+  41 |         0 | Ġenviron
+  42 |         0 | Ġ
+  43 |         0 | 2
+  44 |         0 | 5
+  45 |         0 | Ġmil
+  46 |         0 | les
+  47 |         0 | Ġau
+  48 |         0 | Ġnord
+  49 |         0 | -
+  50 |         0 | est
+  51 |         0 | Ġde
+  52 |         0 | ĠProvidence
+  53 |         0 | ,
+  54 |         0 | Ġdans
+  55 |         0 | Ġle
+  56 |         0 | ĠRhode
+  57 |         0 | ĠIsland
+  58 |         0 | ,
+  59 |         0 | Ġet
+  60 |         0 | ĠÃł
+  61 |         0 | Ġ
+  62 |         0 | 3
+  63 |         0 | 0
+  64 |         0 | Ġmil
+  65 |         0 | les
+  66 |         0 | Ġau
+  67 |         0 | Ġsud
+  68 |         0 | Ġde
+  69 |         0 | ĠBoston
+  70 |         0 | .Ċ
+  71 |         0 | B
+  72 |         0 | rock
+  73 |         0 | ton
+  74 |         0 | Ġest
+  75 |         0 | ĠsituÃ©
+  76 |         0 | ĠÃł
+  77 |         0 | Ġenviron
+  78 |         0 | Ġ
+  79 |         0 | 2
+  80 |         0 | 5
+  81 |         0 | Ġmiles
+  82 |         0 | Ġau
+  83 |         0 | Ġnord
+  84 |         0 | -
+  85 |         0 | est
+  86 |         0 | Ġde
+  87 |         0 | ĠProvidence
+  88 |         0 | ,
+  89 |         0 | Ġdans
+  90 |         0 | Ġle
+  91 |         0 | ĠRhode
+  92 |         0 | ĠIsland
+  93 |         0 | Ġet
+  94 |         0 | ĠÃł
+  95 |         0 | Ġ
+  96 |         0 | 3
+  97 |         0 | 0
+  98 |         0 | Ġmiles
+  99 |         0 | Ġau
+ 100 |         0 | Ġsud
+ 101 |         0 | Ġde
+ 102 |         0 | ĠBoston
+ 103 |         0 | .ĊĊ
+ 104 |         0 | L
+ 105 |         0 | 'Ã©
+ 106 |         0 | cole
+ 107 |         0 | Ġest
+ 108 |         0 | Ġreli
+ 109 |         0 | Ã©e
+ 110 |         0 | Ġau
+ 111 |         0 | ĠdÃ©partement
+ 112 |         0 | Ġsecond
+ 113 |         0 | aire
+ 114 |         0 | Ġde
+ 115 |         0 | Ġl
+ 116 |         0 | 'Ã©
+ 117 |         0 | cole
+ 118 |         0 | Ġd
+ 119 |         0 | 'aut
+ 120 |         0 | isme
+ 121 |         0 | ĠY
+ 122 |         0 | sg
+ 123 |         0 | ol
+ 124 |         0 | ĠPl
+ 125 |         0 | as
+ 126 |         0 | ĠBr
+ 127 |         0 | ond
+ 128 |         0 | y
+ 129 |         0 | ff
+ 130 |         0 | ryn
+ 131 |         0 | ,
+ 132 |         0 | Ġconstr
+ 133 |         0 | uite
+ 134 |         0 | Ġen
+ 135 |         0 | Ġ
+ 136 |         0 | 2
+ 137 |         0 | 0
+ 138 |         0 | 0
+ 139 |         0 | 3
+ 140 |         0 | .Ċ
+ 141 |         0 | L
+ 142 |         0 | 'Ã©
+ 143 |         0 | cole
+ 144 |         0 | Ġest
+ 145 |         0 | Ġen
+ 146 |         0 | Ġliaison
+ 147 |         0 | Ġavec
+ 148 |         0 | Ġle
+ 149 |         0 | ĠdÃ©partement
+ 150 |         0 | Ġsecond
+ 151 |         0 | aire
+ 152 |         0 | Ġde
+ 153 |         0 | Ġl
+ 154 |         0 | 'Ã©
+ 155 |         0 | cole
+ 156 |         0 | Ġd
+ 157 |         0 | 'aut
+ 158 |         0 | isme
+ 159 |         0 | ĠY
+ 160 |         0 | sg
+ 161 |         0 | ol
+ 162 |         0 | ĠPl
+ 163 |         0 | as
+ 164 |         0 | ĠBr
+ 165 |         0 | ond
+ 166 |         0 | y
+ 167 |         0 | ff
+ 168 |         0 | ryn
+ 169 |         0 | ,
+ 170 |         0 | Ġconstr
+ 171 |         0 | uite
+ 172 |         0 | Ġen
+ 173 |         0 | Ġ
+ 174 |         0 | 2
+ 175 |         0 | 0
+ 176 |         0 | 0
+ 177 |         0 | 3
+ 178 |         0 | .ĊĊ
+ 179 |         0 | Cro
+ 180 |         0 | cker
+ 181 |         0 | Ġa
+ 182 |         0 | ĠdÃ©m
+ 183 |         0 | Ã©n
+ 184 |         0 | ag
+ 185 |         0 | Ã©
+ 186 |         0 | Ġde
+ 187 |         0 | ĠN
+ 188 |         0 | atch
+ 189 |         0 | ez
+ 190 |         0 | Ġ(
+ 191 |         0 | Miss
+ 192 |         0 | issippi
+ 193 |         0 | )
+ 194 |         0 | ĠÃł
+ 195 |         0 | ĠVid
+ 196 |         0 | alia
+ 197 |         0 | ,
+ 198 |         0 | Ġsi
+ 199 |         0 | Ã¨ge
+ 200 |         0 | Ġde
+ 201 |         0 | Ġla
+ 202 |         0 | Ġpar
+ 203 |         0 | o
+ 204 |         0 | isse
+ 205 |         0 | Ġde
+ 206 |         0 | ĠConcord
+ 207 |         0 | ia
+ 208 |         0 | ,
+ 209 |         0 | Ġet
+ 210 |         0 | Ġa
+ 211 |         0 | Ġtravers
+ 212 |         0 | Ã©
+ 213 |         0 | Ġle
+ 214 |         0 | Ġcours
+ 215 |         0 | Ġinf
+ 216 |         0 | Ã©rieur
+ 217 |         0 | Ġde
+ 218 |         0 | Ġla
+ 219 |         0 | Ġriv
+ 220 |         0 | iÃ¨re
+ 221 |         0 | ĠOu
+ 222 |         0 | ach
+ 223 |         0 | ita
+ 224 |         0 | ,
+ 225 |         0 | Ġdans
+ 226 |         0 | Ġla
+ 227 |         0 | Ġsection
+ 228 |         0 | Ġappel
+ 229 |         0 | Ã©e
+ 230 |         0 | ĠBlack
+ 231 |         0 | ĠRiver
+ 232 |         0 | .Ċ
+ 233 |         0 | <|im_end|>
+ 234 |         0 | Ċ
+ 235 |         0 | <|im_start|>
+ 236 |         0 | assistant
+ 237 |         0 | Ċ
+ 238 |         1 | Given
+ 239 |         1 | Ġa
+ 240 |         1 | Ġsentence
+ 241 |         1 | Ġin
+ 242 |         1 | ĠFrench
+ 243 |         1 | ,
+ 244 |         1 | Ġprovide
+ 245 |         1 | Ġan
+ 246 |         1 | Ġequivalent
+ 247 |         1 | Ġparaph
+ 248 |         1 | r
+ 249 |         1 | ased
+ 250 |         1 | Ġversion
+ 251 |         1 | Ġfrom
+ 252 |         1 | Ġthe
+ 253 |         1 | Ġoriginal
+ 254 |         1 | Ġthat
+ 255 |         1 | Ġretains
+ 256 |         1 | Ġthe
+ 257 |         1 | Ġsame
+ 258 |         1 | Ġmeaning
+ 259 |         1 | .ĊĊ
+ 260 |         1 | B
+ 261 |         1 | rock
+ 262 |         1 | ton
+ 263 |         1 | Ġest
+ 264 |         1 | ĠÃł
+ 265 |         1 | Ġenviron
+ 266 |         1 | Ġ
+ 267 |         1 | 2
+ 268 |         1 | 5
+ 269 |         1 | Ġmil
+ 270 |         1 | les
+ 271 |         1 | Ġau
+ 272 |         1 | Ġnord
+ 273 |         1 | -
+ 274 |         1 | est
+ 275 |         1 | Ġde
+ 276 |         1 | ĠProvidence
+ 277 |         1 | ,
+ 278 |         1 | Ġdans
+ 279 |         1 | Ġle
+ 280 |         1 | ĠRhode
+ 281 |         1 | ĠIsland
+ 282 |         1 | ,
+ 283 |         1 | Ġet
+ 284 |         1 | ĠÃł
+ 285 |         1 | Ġ
+ 286 |         1 | 3
+ 287 |         1 | 0
+ 288 |         1 | Ġmil
+ 289 |         1 | les
+ 290 |         1 | Ġau
+ 291 |         1 | Ġsud
+ 292 |         1 | Ġde
+ 293 |         1 | ĠBoston
+ 294 |         1 | .Ċ
+ 295 |         1 | B
+ 296 |         1 | rock
+ 297 |         1 | ton
+ 298 |         1 | Ġest
+ 299 |         1 | ĠsituÃ©
+ 300 |         1 | ĠÃł
+ 301 |         1 | Ġenviron
+ 302 |         1 | Ġ
+ 303 |         1 | 2
+ 304 |         1 | 5
+ 305 |         1 | Ġmiles
+ 306 |         1 | Ġau
+ 307 |         1 | Ġnord
+ 308 |         1 | -
+ 309 |         1 | est
+ 310 |         1 | Ġde
+ 311 |         1 | ĠProvidence
+ 312 |         1 | ,
+ 313 |         1 | Ġdans
+ 314 |         1 | Ġle
+ 315 |         1 | ĠRhode
+ 316 |         1 | ĠIsland
+ 317 |         1 | Ġet
+ 318 |         1 | ĠÃł
+ 319 |         1 | Ġ
+ 320 |         1 | 3
+ 321 |         1 | 0
+ 322 |         1 | Ġmiles
+ 323 |         1 | Ġau
+ 324 |         1 | Ġsud
+ 325 |         1 | Ġde
+ 326 |         1 | ĠBoston
+ 327 |         1 | .ĊĊ
+ 328 |         1 | L
+ 329 |         1 | 'Ã©
+ 330 |         1 | cole
+ 331 |         1 | Ġest
+ 332 |         1 | Ġreli
+ 333 |         1 | Ã©e
+ 334 |         1 | Ġau
+ 335 |         1 | ĠdÃ©partement
+ 336 |         1 | Ġsecond
+ 337 |         1 | aire
+ 338 |         1 | Ġde
+ 339 |         1 | Ġl
+ 340 |         1 | 'Ã©
+ 341 |         1 | cole
+ 342 |         1 | Ġd
+ 343 |         1 | 'aut
+ 344 |         1 | isme
+ 345 |         1 | ĠY
+ 346 |         1 | sg
+ 347 |         1 | ol
+ 348 |         1 | ĠPl
+ 349 |         1 | as
+ 350 |         1 | ĠBr
+ 351 |         1 | ond
+ 352 |         1 | y
+ 353 |         1 | ff
+ 354 |         1 | ryn
+ 355 |         1 | ,
+ 356 |         1 | Ġconstr
+ 357 |         1 | uite
+ 358 |         1 | Ġen
+ 359 |         1 | Ġ
+ 360 |         1 | 2
+ 361 |         1 | 0
+ 362 |         1 | 0
+ 363 |         1 | 3
+ 364 |         1 | .Ċ
+ 365 |         1 | L
+ 366 |         1 | 'Ã©
+ 367 |         1 | cole
+ 368 |         1 | Ġest
+ 369 |         1 | Ġen
+ 370 |         1 | Ġliaison
+ 371 |         1 | Ġavec
+ 372 |         1 | Ġle
+ 373 |         1 | ĠdÃ©partement
+ 374 |         1 | Ġsecond
+ 375 |         1 | aire
+ 376 |         1 | Ġde
+ 377 |         1 | Ġl
+ 378 |         1 | 'Ã©
+ 379 |         1 | cole
+ 380 |         1 | Ġd
+ 381 |         1 | 'aut
+ 382 |         1 | isme
+ 383 |         1 | ĠY
+ 384 |         1 | sg
+ 385 |         1 | ol
+ 386 |         1 | ĠPl
+ 387 |         1 | as
+ 388 |         1 | ĠBr
+ 389 |         1 | ond
+ 390 |         1 | y
+ 391 |         1 | ff
+ 392 |         1 | ryn
+ 393 |         1 | ,
+ 394 |         1 | Ġconstr
+ 395 |         1 | uite
+ 396 |         1 | Ġen
+ 397 |         1 | Ġ
+ 398 |         1 | 2
+ 399 |         1 | 0
+ 400 |         1 | 0
+ 401 |         1 | 3
+ 402 |         1 | .ĊĊ
+ 403 |         1 | Cro
+ 404 |         1 | cker
+ 405 |         1 | Ġa
+ 406 |         1 | ĠdÃ©m
+ 407 |         1 | Ã©n
+ 408 |         1 | ag
+ 409 |         1 | Ã©
+ 410 |         1 | Ġde
+ 411 |         1 | ĠN
+ 412 |         1 | atch
+ 413 |         1 | ez
+ 414 |         1 | Ġ(
+ 415 |         1 | Miss
+ 416 |         1 | issippi
+ 417 |         1 | )
+ 418 |         1 | ĠÃł
+ 419 |         1 | ĠVid
+ 420 |         1 | alia
+ 421 |         1 | ,
+ 422 |         1 | Ġsi
+ 423 |         1 | Ã¨ge
+ 424 |         1 | Ġde
+ 425 |         1 | Ġla
+ 426 |         1 | Ġpar
+ 427 |         1 | o
+ 428 |         1 | isse
+ 429 |         1 | Ġde
+ 430 |         1 | ĠConcord
+ 431 |         1 | ia
+ 432 |         1 | ,
+ 433 |         1 | Ġet
+ 434 |         1 | Ġa
+ 435 |         1 | Ġtravers
+ 436 |         1 | Ã©
+ 437 |         1 | Ġle
+ 438 |         1 | Ġcours
+ 439 |         1 | Ġinf
+ 440 |         1 | Ã©rieur
+ 441 |         1 | Ġde
+ 442 |         1 | Ġla
+ 443 |         1 | Ġriv
+ 444 |         1 | iÃ¨re
+ 445 |         1 | ĠOu
+ 446 |         1 | ach
+ 447 |         1 | ita
+ 448 |         1 | ,
+ 449 |         1 | Ġdans
+ 450 |         1 | Ġla
+ 451 |         1 | Ġsection
+ 452 |         1 | Ġappel
+ 453 |         1 | Ã©e
+ 454 |         1 | ĠBlack
+ 455 |         1 | ĠRiver
+ 456 |         1 | .ĊĊ
+ 457 |         1 | C
+ 458 |         1 | rocket
+ 459 |         1 | t
+ 460 |         1 | Ġa
+ 461 |         1 | ĠdÃ©m
+ 462 |         1 | Ã©n
+ 463 |         1 | ag
+ 464 |         1 | Ã©
+ 465 |         1 | Ġde
+ 466 |         1 | ĠN
+ 467 |         1 | atch
+ 468 |         1 | ez
+ 469 |         1 | Ġ(
+ 470 |         1 | Miss
+ 471 |         1 | issippi
+ 472 |         1 | )
+ 473 |         1 | ĠÃł
+ 474 |         1 | ĠVid
+ 475 |         1 | alia
+ 476 |         1 | ,
+ 477 |         1 | Ġsi
+ 478 |         1 | Ã¨ge
+ 479 |         1 | Ġde
+ 480 |         1 | Ġla
+ 481 |         1 | Ġpar
+ 482 |         1 | o
+ 483 |         1 | isse
+ 484 |         1 | Ġde
+ 485 |         1 | ĠConcord
+ 486 |         1 | ia
+ 487 |         1 | ,
+ 488 |         1 | Ġet
+ 489 |         1 | Ġa
+ 490 |         1 | Ġtravers
+ 491 |         1 | Ã©
+ 492 |         1 | Ġle
+ 493 |         1 | Ġcours
+ 494 |         1 | Ġinf
+ 495 |         1 | Ã©rieur
+ 496 |         1 | Ġde
+ 497 |         1 | Ġla
+ 498 |         1 | Ġriv
+ 499 |         1 | iÃ¨re
+ 500 |         1 | ĠOu
+ 501 |         1 | ach
+ 502 |         1 | ita
+ 503 |         1 | ,
+ 504 |         1 | Ġdans
+ 505 |         1 | Ġla
+ 506 |         1 | Ġsection
+ 507 |         1 | Ġappel
+ 508 |         1 | Ã©e
+ 509 |         1 | ĠBlack
+ 510 |         1 | ĠRiver
+ 511 |         1 | .ĊĊ
+
+=== UltraFeedback Example 3 - Rejected - Tokenized with Attention Mask ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         0 | <|im_start|>
+   1 |         0 | system
+   2 |         0 | Ċ
+   3 |         0 | You
+   4 |         0 | Ġare
+   5 |         0 | Ġa
+   6 |         0 | Ġhelpful
+   7 |         0 | Ġassistant
+   8 |         0 | .
+   9 |         0 | <|im_end|>
+  10 |         0 | Ċ
+  11 |         0 | <|im_start|>
+  12 |         0 | user
+  13 |         0 | Ċ
+  14 |         0 | Given
+  15 |         0 | Ġa
+  16 |         0 | Ġsentence
+  17 |         0 | Ġin
+  18 |         0 | ĠFrench
+  19 |         0 | ,
+  20 |         0 | Ġprovide
+  21 |         0 | Ġan
+  22 |         0 | Ġequivalent
+  23 |         0 | Ġparaph
+  24 |         0 | r
+  25 |         0 | ased
+  26 |         0 | Ġversion
+  27 |         0 | Ġfrom
+  28 |         0 | Ġthe
+  29 |         0 | Ġoriginal
+  30 |         0 | Ġthat
+  31 |         0 | Ġretains
+  32 |         0 | Ġthe
+  33 |         0 | Ġsame
+  34 |         0 | Ġmeaning
+  35 |         0 | .ĊĊ
+  36 |         0 | B
+  37 |         0 | rock
+  38 |         0 | ton
+  39 |         0 | Ġest
+  40 |         0 | ĠÃł
+  41 |         0 | Ġenviron
+  42 |         0 | Ġ
+  43 |         0 | 2
+  44 |         0 | 5
+  45 |         0 | Ġmil
+  46 |         0 | les
+  47 |         0 | Ġau
+  48 |         0 | Ġnord
+  49 |         0 | -
+  50 |         0 | est
+  51 |         0 | Ġde
+  52 |         0 | ĠProvidence
+  53 |         0 | ,
+  54 |         0 | Ġdans
+  55 |         0 | Ġle
+  56 |         0 | ĠRhode
+  57 |         0 | ĠIsland
+  58 |         0 | ,
+  59 |         0 | Ġet
+  60 |         0 | ĠÃł
+  61 |         0 | Ġ
+  62 |         0 | 3
+  63 |         0 | 0
+  64 |         0 | Ġmil
+  65 |         0 | les
+  66 |         0 | Ġau
+  67 |         0 | Ġsud
+  68 |         0 | Ġde
+  69 |         0 | ĠBoston
+  70 |         0 | .Ċ
+  71 |         0 | B
+  72 |         0 | rock
+  73 |         0 | ton
+  74 |         0 | Ġest
+  75 |         0 | ĠsituÃ©
+  76 |         0 | ĠÃł
+  77 |         0 | Ġenviron
+  78 |         0 | Ġ
+  79 |         0 | 2
+  80 |         0 | 5
+  81 |         0 | Ġmiles
+  82 |         0 | Ġau
+  83 |         0 | Ġnord
+  84 |         0 | -
+  85 |         0 | est
+  86 |         0 | Ġde
+  87 |         0 | ĠProvidence
+  88 |         0 | ,
+  89 |         0 | Ġdans
+  90 |         0 | Ġle
+  91 |         0 | ĠRhode
+  92 |         0 | ĠIsland
+  93 |         0 | Ġet
+  94 |         0 | ĠÃł
+  95 |         0 | Ġ
+  96 |         0 | 3
+  97 |         0 | 0
+  98 |         0 | Ġmiles
+  99 |         0 | Ġau
+ 100 |         0 | Ġsud
+ 101 |         0 | Ġde
+ 102 |         0 | ĠBoston
+ 103 |         0 | .ĊĊ
+ 104 |         0 | L
+ 105 |         0 | 'Ã©
+ 106 |         0 | cole
+ 107 |         0 | Ġest
+ 108 |         0 | Ġreli
+ 109 |         0 | Ã©e
+ 110 |         0 | Ġau
+ 111 |         0 | ĠdÃ©partement
+ 112 |         0 | Ġsecond
+ 113 |         0 | aire
+ 114 |         0 | Ġde
+ 115 |         0 | Ġl
+ 116 |         0 | 'Ã©
+ 117 |         0 | cole
+ 118 |         0 | Ġd
+ 119 |         0 | 'aut
+ 120 |         0 | isme
+ 121 |         0 | ĠY
+ 122 |         0 | sg
+ 123 |         0 | ol
+ 124 |         0 | ĠPl
+ 125 |         0 | as
+ 126 |         0 | ĠBr
+ 127 |         0 | ond
+ 128 |         0 | y
+ 129 |         0 | ff
+ 130 |         0 | ryn
+ 131 |         0 | ,
+ 132 |         0 | Ġconstr
+ 133 |         0 | uite
+ 134 |         0 | Ġen
+ 135 |         0 | Ġ
+ 136 |         0 | 2
+ 137 |         0 | 0
+ 138 |         0 | 0
+ 139 |         0 | 3
+ 140 |         0 | .Ċ
+ 141 |         0 | L
+ 142 |         0 | 'Ã©
+ 143 |         0 | cole
+ 144 |         0 | Ġest
+ 145 |         0 | Ġen
+ 146 |         0 | Ġliaison
+ 147 |         0 | Ġavec
+ 148 |         0 | Ġle
+ 149 |         0 | ĠdÃ©partement
+ 150 |         0 | Ġsecond
+ 151 |         0 | aire
+ 152 |         0 | Ġde
+ 153 |         0 | Ġl
+ 154 |         0 | 'Ã©
+ 155 |         0 | cole
+ 156 |         0 | Ġd
+ 157 |         0 | 'aut
+ 158 |         0 | isme
+ 159 |         0 | ĠY
+ 160 |         0 | sg
+ 161 |         0 | ol
+ 162 |         0 | ĠPl
+ 163 |         0 | as
+ 164 |         0 | ĠBr
+ 165 |         0 | ond
+ 166 |         0 | y
+ 167 |         0 | ff
+ 168 |         0 | ryn
+ 169 |         0 | ,
+ 170 |         0 | Ġconstr
+ 171 |         0 | uite
+ 172 |         0 | Ġen
+ 173 |         0 | Ġ
+ 174 |         0 | 2
+ 175 |         0 | 0
+ 176 |         0 | 0
+ 177 |         0 | 3
+ 178 |         0 | .ĊĊ
+ 179 |         0 | Cro
+ 180 |         0 | cker
+ 181 |         0 | Ġa
+ 182 |         0 | ĠdÃ©m
+ 183 |         0 | Ã©n
+ 184 |         0 | ag
+ 185 |         0 | Ã©
+ 186 |         0 | Ġde
+ 187 |         0 | ĠN
+ 188 |         0 | atch
+ 189 |         0 | ez
+ 190 |         0 | Ġ(
+ 191 |         0 | Miss
+ 192 |         0 | issippi
+ 193 |         0 | )
+ 194 |         0 | ĠÃł
+ 195 |         0 | ĠVid
+ 196 |         0 | alia
+ 197 |         0 | ,
+ 198 |         0 | Ġsi
+ 199 |         0 | Ã¨ge
+ 200 |         0 | Ġde
+ 201 |         0 | Ġla
+ 202 |         0 | Ġpar
+ 203 |         0 | o
+ 204 |         0 | isse
+ 205 |         0 | Ġde
+ 206 |         0 | ĠConcord
+ 207 |         0 | ia
+ 208 |         0 | ,
+ 209 |         0 | Ġet
+ 210 |         0 | Ġa
+ 211 |         0 | Ġtravers
+ 212 |         0 | Ã©
+ 213 |         0 | Ġle
+ 214 |         0 | Ġcours
+ 215 |         0 | Ġinf
+ 216 |         0 | Ã©rieur
+ 217 |         0 | Ġde
+ 218 |         0 | Ġla
+ 219 |         0 | Ġriv
+ 220 |         0 | iÃ¨re
+ 221 |         0 | ĠOu
+ 222 |         0 | ach
+ 223 |         0 | ita
+ 224 |         0 | ,
+ 225 |         0 | Ġdans
+ 226 |         0 | Ġla
+ 227 |         0 | Ġsection
+ 228 |         0 | Ġappel
+ 229 |         0 | Ã©e
+ 230 |         0 | ĠBlack
+ 231 |         0 | ĠRiver
+ 232 |         0 | .Ċ
+ 233 |         0 | <|im_end|>
+ 234 |         0 | Ċ
+ 235 |         0 | <|im_start|>
+ 236 |         0 | assistant
+ 237 |         0 | Ċ
+ 238 |         1 | Given
+ 239 |         1 | Ġa
+ 240 |         1 | Ġsentence
+ 241 |         1 | Ġin
+ 242 |         1 | ĠFrench
+ 243 |         1 | ,
+ 244 |         1 | Ġprovide
+ 245 |         1 | Ġan
+ 246 |         1 | Ġequivalent
+ 247 |         1 | Ġparaph
+ 248 |         1 | r
+ 249 |         1 | ased
+ 250 |         1 | Ġversion
+ 251 |         1 | Ġfrom
+ 252 |         1 | Ġthe
+ 253 |         1 | Ġoriginal
+ 254 |         1 | Ġthat
+ 255 |         1 | Ġretains
+ 256 |         1 | Ġthe
+ 257 |         1 | Ġsame
+ 258 |         1 | Ġmeaning
+ 259 |         1 | .ĊĊ
+ 260 |         1 | B
+ 261 |         1 | rock
+ 262 |         1 | ton
+ 263 |         1 | Ġest
+ 264 |         1 | ĠÃł
+ 265 |         1 | Ġenviron
+ 266 |         1 | Ġ
+ 267 |         1 | 2
+ 268 |         1 | 5
+ 269 |         1 | Ġmil
+ 270 |         1 | les
+ 271 |         1 | Ġau
+ 272 |         1 | Ġnord
+ 273 |         1 | -
+ 274 |         1 | est
+ 275 |         1 | Ġde
+ 276 |         1 | ĠProvidence
+ 277 |         1 | ,
+ 278 |         1 | Ġdans
+ 279 |         1 | Ġle
+ 280 |         1 | ĠRhode
+ 281 |         1 | ĠIsland
+ 282 |         1 | ,
+ 283 |         1 | Ġet
+ 284 |         1 | ĠÃł
+ 285 |         1 | Ġ
+ 286 |         1 | 3
+ 287 |         1 | 0
+ 288 |         1 | Ġmil
+ 289 |         1 | les
+ 290 |         1 | Ġau
+ 291 |         1 | Ġsud
+ 292 |         1 | Ġde
+ 293 |         1 | ĠBoston
+ 294 |         1 | .Ċ
+ 295 |         1 | B
+ 296 |         1 | rock
+ 297 |         1 | ton
+ 298 |         1 | Ġest
+ 299 |         1 | ĠsituÃ©
+ 300 |         1 | ĠÃł
+ 301 |         1 | Ġenviron
+ 302 |         1 | Ġ
+ 303 |         1 | 2
+ 304 |         1 | 5
+ 305 |         1 | Ġmiles
+ 306 |         1 | Ġau
+ 307 |         1 | Ġnord
+ 308 |         1 | -
+ 309 |         1 | est
+ 310 |         1 | Ġde
+ 311 |         1 | ĠProvidence
+ 312 |         1 | ,
+ 313 |         1 | Ġdans
+ 314 |         1 | Ġle
+ 315 |         1 | ĠRhode
+ 316 |         1 | ĠIsland
+ 317 |         1 | Ġet
+ 318 |         1 | ĠÃł
+ 319 |         1 | Ġ
+ 320 |         1 | 3
+ 321 |         1 | 0
+ 322 |         1 | Ġmiles
+ 323 |         1 | Ġau
+ 324 |         1 | Ġsud
+ 325 |         1 | Ġde
+ 326 |         1 | ĠBoston
+ 327 |         1 | .ĊĊ
+ 328 |         1 | L
+ 329 |         1 | 'Ã©
+ 330 |         1 | cole
+ 331 |         1 | Ġest
+ 332 |         1 | Ġreli
+ 333 |         1 | Ã©e
+ 334 |         1 | Ġau
+ 335 |         1 | ĠdÃ©partement
+ 336 |         1 | Ġsecond
+ 337 |         1 | aire
+ 338 |         1 | Ġde
+ 339 |         1 | Ġl
+ 340 |         1 | 'Ã©
+ 341 |         1 | cole
+ 342 |         1 | Ġd
+ 343 |         1 | 'aut
+ 344 |         1 | isme
+ 345 |         1 | ĠY
+ 346 |         1 | sg
+ 347 |         1 | ol
+ 348 |         1 | ĠPl
+ 349 |         1 | as
+ 350 |         1 | ĠBr
+ 351 |         1 | ond
+ 352 |         1 | y
+ 353 |         1 | ff
+ 354 |         1 | ryn
+ 355 |         1 | ,
+ 356 |         1 | Ġconstr
+ 357 |         1 | uite
+ 358 |         1 | Ġen
+ 359 |         1 | Ġ
+ 360 |         1 | 2
+ 361 |         1 | 0
+ 362 |         1 | 0
+ 363 |         1 | 3
+ 364 |         1 | .Ċ
+ 365 |         1 | L
+ 366 |         1 | 'Ã©
+ 367 |         1 | cole
+ 368 |         1 | Ġest
+ 369 |         1 | Ġen
+ 370 |         1 | Ġliaison
+ 371 |         1 | Ġavec
+ 372 |         1 | Ġle
+ 373 |         1 | ĠdÃ©partement
+ 374 |         1 | Ġsecond
+ 375 |         1 | aire
+ 376 |         1 | Ġde
+ 377 |         1 | Ġl
+ 378 |         1 | 'Ã©
+ 379 |         1 | cole
+ 380 |         1 | Ġd
+ 381 |         1 | 'aut
+ 382 |         1 | isme
+ 383 |         1 | ĠY
+ 384 |         1 | sg
+ 385 |         1 | ol
+ 386 |         1 | ĠPl
+ 387 |         1 | as
+ 388 |         1 | ĠBr
+ 389 |         1 | ond
+ 390 |         1 | y
+ 391 |         1 | ff
+ 392 |         1 | ryn
+ 393 |         1 | ,
+ 394 |         1 | Ġconstr
+ 395 |         1 | uite
+ 396 |         1 | Ġen
+ 397 |         1 | Ġ
+ 398 |         1 | 2
+ 399 |         1 | 0
+ 400 |         1 | 0
+ 401 |         1 | 3
+ 402 |         1 | .ĊĊ
+ 403 |         1 | Cro
+ 404 |         1 | cker
+ 405 |         1 | Ġa
+ 406 |         1 | ĠdÃ©m
+ 407 |         1 | Ã©n
+ 408 |         1 | ag
+ 409 |         1 | Ã©
+ 410 |         1 | Ġde
+ 411 |         1 | ĠN
+ 412 |         1 | atch
+ 413 |         1 | ez
+ 414 |         1 | Ġ(
+ 415 |         1 | Miss
+ 416 |         1 | issippi
+ 417 |         1 | )
+ 418 |         1 | ĠÃł
+ 419 |         1 | ĠVid
+ 420 |         1 | alia
+ 421 |         1 | ,
+ 422 |         1 | Ġsi
+ 423 |         1 | Ã¨ge
+ 424 |         1 | Ġde
+ 425 |         1 | Ġla
+ 426 |         1 | Ġpar
+ 427 |         1 | o
+ 428 |         1 | isse
+ 429 |         1 | Ġde
+ 430 |         1 | ĠConcord
+ 431 |         1 | ia
+ 432 |         1 | ,
+ 433 |         1 | Ġet
+ 434 |         1 | Ġa
+ 435 |         1 | Ġtravers
+ 436 |         1 | Ã©
+ 437 |         1 | Ġle
+ 438 |         1 | Ġcours
+ 439 |         1 | Ġinf
+ 440 |         1 | Ã©rieur
+ 441 |         1 | Ġde
+ 442 |         1 | Ġla
+ 443 |         1 | Ġriv
+ 444 |         1 | iÃ¨re
+ 445 |         1 | ĠOu
+ 446 |         1 | ach
+ 447 |         1 | ita
+ 448 |         1 | ,
+ 449 |         1 | Ġdans
+ 450 |         1 | Ġla
+ 451 |         1 | Ġsection
+ 452 |         1 | Ġappel
+ 453 |         1 | Ã©e
+ 454 |         1 | ĠBlack
+ 455 |         1 | ĠRiver
+ 456 |         1 | .ĊĊ
+ 457 |         1 | Sure
+ 458 |         1 | !
+ 459 |         1 | ĠI
+ 460 |         1 | 'd
+ 461 |         1 | Ġbe
+ 462 |         1 | Ġhappy
+ 463 |         1 | Ġto
+ 464 |         1 | Ġhelp
+ 465 |         1 | Ġwith
+ 466 |         1 | Ġyour
+ 467 |         1 | Ġquestions
+ 468 |         1 | .
+ 469 |         1 | ĠHere
+ 470 |         1 | Ġare
+ 471 |         1 | Ġthe
+ 472 |         1 | Ġparaph
+ 473 |         1 | r
+ 474 |         1 | ased
+ 475 |         1 | Ġversions
+ 476 |         1 | Ġof
+ 477 |         1 | Ġthe
+ 478 |         1 | Ġsentences
+ 479 |         1 | Ġyou
+ 480 |         1 | Ġprovided
+ 481 |         1 | ,
+ 482 |         1 | Ġretaining
+ 483 |         1 | Ġthe
+ 484 |         1 | Ġsame
+ 485 |         1 | Ġmeaning
+ 486 |         1 | Ġin
+ 487 |         1 | ĠFrench
+ 488 |         1 | :ĊĊ
+ 489 |         1 | 1
+ 490 |         1 | .
+ 491 |         1 | ĠBrock
+ 492 |         1 | ton
+ 493 |         1 | Ġis
+ 494 |         1 | Ġlocated
+ 495 |         1 | Ġapproximately
+ 496 |         1 | Ġ
+ 497 |         1 | 2
+ 498 |         1 | 5
+ 499 |         1 | Ġmiles
+ 500 |         1 | Ġnorthwest
+ 501 |         1 | Ġof
+ 502 |         1 | ĠProvidence
+ 503 |         1 | ,
+ 504 |         1 | ĠRhode
+ 505 |         1 | ĠIsland
+ 506 |         1 | ,
+ 507 |         1 | Ġand
+ 508 |         1 | Ġ
+ 509 |         1 | 3
+ 510 |         1 | 0
+ 511 |         1 | Ġmiles
+
+**4. DPO Mask Analysis:**
+Original vs Fixed Masks:
+- Split point (where chosen/rejected first differ): 457
+- Original chosen first mask=1: 238
+- Fixed chosen first mask=1: 457
+- Chosen attention mask changes: 219
+- Chosen mask properly aligned with split point? Yes
+
+----------------------------------------------------------------------
+
+## 2. EVALUATION PIPELINE DEBUGGING
+
+### 2.1 Evaluation Dataset
+
+#### Evaluation Prompt 1
+**1. Original Prompt:**
+```
+In this task, you are given a second sentence. Your task is to generate the first sentence on the same topic but incoherent and inconsistent with the second sentence.
+
+Q: Additionally , some groups may contain other specialists , such as a heavy weapons or language expert .
+
+A: Each squad member is specially trained as a weapons expert , medic , combat engineer or communications expert , respectively .
+****
+Q: However , the General Accounting Office identified 125 countries that received U.S. training and assistance for their police forces during fiscal year 1990 at a cost of at least $117 million .
+
+A: No government agency is in charge of calculating the cost .
+****
+Q: But his frozen body was found in the ice in Charlotte ( Rochester ) early the next spring by Silas Hudson .
+
+A:
+```
+
+**2. After _format_conversation:**
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+In this task, you are given a second sentence. Your task is to generate the first sentence on the same topic but incoherent and inconsistent with the second sentence.
+
+Q: Additionally , some groups may contain other specialists , such as a heavy weapons or language expert .
+
+A: Each squad member is specially trained as a weapons expert , medic , combat engineer or communications expert , respectively .
+****
+Q: However , the General Accounting Office identified 125 countries that received U.S. training and assistance for their police forces during fiscal year 1990 at a cost of at least $117 million .
+
+A: No government agency is in charge of calculating the cost .
+****
+Q: But his frozen body was found in the ice in Charlotte ( Rochester ) early the next spring by Silas Hudson .
+
+A:<|im_end|>
+
+```
+
+**3. After Tokenization:**
+=== Evaluation Prompt 1 - Tokenized ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         1 | <|im_start|>
+   1 |         1 | system
+   2 |         1 | Ċ
+   3 |         1 | You
+   4 |         1 | Ġare
+   5 |         1 | Ġa
+   6 |         1 | Ġhelpful
+   7 |         1 | Ġassistant
+   8 |         1 | .
+   9 |         1 | <|im_end|>
+  10 |         1 | Ċ
+  11 |         1 | <|im_start|>
+  12 |         1 | user
+  13 |         1 | Ċ
+  14 |         1 | In
+  15 |         1 | Ġthis
+  16 |         1 | Ġtask
+  17 |         1 | ,
+  18 |         1 | Ġyou
+  19 |         1 | Ġare
+  20 |         1 | Ġgiven
+  21 |         1 | Ġa
+  22 |         1 | Ġsecond
+  23 |         1 | Ġsentence
+  24 |         1 | .
+  25 |         1 | ĠYour
+  26 |         1 | Ġtask
+  27 |         1 | Ġis
+  28 |         1 | Ġto
+  29 |         1 | Ġgenerate
+  30 |         1 | Ġthe
+  31 |         1 | Ġfirst
+  32 |         1 | Ġsentence
+  33 |         1 | Ġon
+  34 |         1 | Ġthe
+  35 |         1 | Ġsame
+  36 |         1 | Ġtopic
+  37 |         1 | Ġbut
+  38 |         1 | Ġin
+  39 |         1 | co
+  40 |         1 | herent
+  41 |         1 | Ġand
+  42 |         1 | Ġinconsistent
+  43 |         1 | Ġwith
+  44 |         1 | Ġthe
+  45 |         1 | Ġsecond
+  46 |         1 | Ġsentence
+  47 |         1 | .ĊĊ
+  48 |         1 | Q
+  49 |         1 | :
+  50 |         1 | ĠAdditionally
+  51 |         1 | Ġ,
+  52 |         1 | Ġsome
+  53 |         1 | Ġgroups
+  54 |         1 | Ġmay
+  55 |         1 | Ġcontain
+  56 |         1 | Ġother
+  57 |         1 | Ġspecialists
+  58 |         1 | Ġ,
+  59 |         1 | Ġsuch
+  60 |         1 | Ġas
+  61 |         1 | Ġa
+  62 |         1 | Ġheavy
+  63 |         1 | Ġweapons
+  64 |         1 | Ġor
+  65 |         1 | Ġlanguage
+  66 |         1 | Ġexpert
+  67 |         1 | Ġ.ĊĊ
+  68 |         1 | A
+  69 |         1 | :
+  70 |         1 | ĠEach
+  71 |         1 | Ġsquad
+  72 |         1 | Ġmember
+  73 |         1 | Ġis
+  74 |         1 | Ġspecially
+  75 |         1 | Ġtrained
+  76 |         1 | Ġas
+  77 |         1 | Ġa
+  78 |         1 | Ġweapons
+  79 |         1 | Ġexpert
+  80 |         1 | Ġ,
+  81 |         1 | Ġmedic
+  82 |         1 | Ġ,
+  83 |         1 | Ġcombat
+  84 |         1 | Ġengineer
+  85 |         1 | Ġor
+  86 |         1 | Ġcommunications
+  87 |         1 | Ġexpert
+  88 |         1 | Ġ,
+  89 |         1 | Ġrespectively
+  90 |         1 | Ġ.Ċ
+  91 |         1 | ****Ċ
+  92 |         1 | Q
+  93 |         1 | :
+  94 |         1 | ĠHowever
+  95 |         1 | Ġ,
+  96 |         1 | Ġthe
+  97 |         1 | ĠGeneral
+  98 |         1 | ĠAccounting
+  99 |         1 | ĠOffice
+ 100 |         1 | Ġidentified
+ 101 |         1 | Ġ
+ 102 |         1 | 1
+ 103 |         1 | 2
+ 104 |         1 | 5
+ 105 |         1 | Ġcountries
+ 106 |         1 | Ġthat
+ 107 |         1 | Ġreceived
+ 108 |         1 | ĠU
+ 109 |         1 | .S
+ 110 |         1 | .
+ 111 |         1 | Ġtraining
+ 112 |         1 | Ġand
+ 113 |         1 | Ġassistance
+ 114 |         1 | Ġfor
+ 115 |         1 | Ġtheir
+ 116 |         1 | Ġpolice
+ 117 |         1 | Ġforces
+ 118 |         1 | Ġduring
+ 119 |         1 | Ġfiscal
+ 120 |         1 | Ġyear
+ 121 |         1 | Ġ
+ 122 |         1 | 1
+ 123 |         1 | 9
+ 124 |         1 | 9
+ 125 |         1 | 0
+ 126 |         1 | Ġat
+ 127 |         1 | Ġa
+ 128 |         1 | Ġcost
+ 129 |         1 | Ġof
+ 130 |         1 | Ġat
+ 131 |         1 | Ġleast
+ 132 |         1 | Ġ$
+ 133 |         1 | 1
+ 134 |         1 | 1
+ 135 |         1 | 7
+ 136 |         1 | Ġmillion
+ 137 |         1 | Ġ.ĊĊ
+ 138 |         1 | A
+ 139 |         1 | :
+ 140 |         1 | ĠNo
+ 141 |         1 | Ġgovernment
+ 142 |         1 | Ġagency
+ 143 |         1 | Ġis
+ 144 |         1 | Ġin
+ 145 |         1 | Ġcharge
+ 146 |         1 | Ġof
+ 147 |         1 | Ġcalculating
+ 148 |         1 | Ġthe
+ 149 |         1 | Ġcost
+ 150 |         1 | Ġ.Ċ
+ 151 |         1 | ****Ċ
+ 152 |         1 | Q
+ 153 |         1 | :
+ 154 |         1 | ĠBut
+ 155 |         1 | Ġhis
+ 156 |         1 | Ġfrozen
+ 157 |         1 | Ġbody
+ 158 |         1 | Ġwas
+ 159 |         1 | Ġfound
+ 160 |         1 | Ġin
+ 161 |         1 | Ġthe
+ 162 |         1 | Ġice
+ 163 |         1 | Ġin
+ 164 |         1 | ĠCharlotte
+ 165 |         1 | Ġ(
+ 166 |         1 | ĠRochester
+ 167 |         1 | Ġ)
+ 168 |         1 | Ġearly
+ 169 |         1 | Ġthe
+ 170 |         1 | Ġnext
+ 171 |         1 | Ġspring
+ 172 |         1 | Ġby
+ 173 |         1 | ĠSil
+ 174 |         1 | as
+ 175 |         1 | ĠHudson
+ 176 |         1 | Ġ.ĊĊ
+ 177 |         1 | A
+ 178 |         1 | :
+ 179 |         1 | <|im_end|>
+ 180 |         1 | Ċ
+
+----------------------------------------------------------------------
+
+#### Evaluation Prompt 2
+**1. Original Prompt:**
+```
+The floor of a rectangular room is 19 m long and 12 m wide. The room is surrounded by a veranda of width 2 m on all its sides. The area of the veranda is :
+Options:
+(A) 144 m2
+(B) 140 m2
+(C) 108 m2
+(D) 158 m2
+(E) None of these
+Answer and stream of consciousness: (B)
+Stream of consciousness: Area of the outer rectangle = 23 Ã— 16 = 368 m2
+Area of the inner rectangle = 19 Ã— 12 = 228 m2
+Required area = (368 â€“ 228) = 140 m2
+
+
+A no. when divided by the sum of 555 and 445 gives 2times their difference as quotient & 30 as remainder. Find the no. is?
+Options:
+(A) 124432
+(B) 145366
+(C) 157768
+(D) 178432
+(E) 220030
+Answer and stream of consciousness: (E)
+Stream of consciousness: (555 + 445) * 2 * 110 + 30 = 220000 + 30 = 220030
+
+
+The game of blackjack is played with a deck consisting of 13 cards (one of each of the numbers 2-10, one jack, one queen, one king, and one of ace) in each of four suits: clubs, diamonds, hearts, and spades.
+In a game of blackjack, if your first card is a spade, what are the odds that it is an ace?
+Options:
+(A) 1/52
+(B) 1/26
+(C) 1/13
+(D) 1/4
+(E) 5/13
+Answer and stream of consciousness: (C)
+Stream of consciousness: There are 13 spades, the probability that the spade we already have is an ace is therefore 1/13.
+
+
+Jade has 4 flavors of ice cream in his parlor. How many options are there for James to pick a one-flavor, two-flavor, three-flavor or four-flavor order?
+Options:
+(A) 15
+(B) 13
+(C) 14
+(D) 17
+(E) 18
+Answer and stream of consciousness:
+```
+
+**2. After _format_conversation:**
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+The floor of a rectangular room is 19 m long and 12 m wide. The room is surrounded by a veranda of width 2 m on all its sides. The area of the veranda is :
+Options:
+(A) 144 m2
+(B) 140 m2
+(C) 108 m2
+(D) 158 m2
+(E) None of these
+Answer and stream of consciousness: (B)
+Stream of consciousness: Area of the outer rectangle = 23 Ã— 16 = 368 m2
+Area of the inner rectangle = 19 Ã— 12 = 228 m2
+Required area = (368 â€“ 228) = 140 m2
+
+
+A no. when divided by the sum of 555 and 445 gives 2times their difference as quotient & 30 as remainder. Find the no. is?
+Options:
+(A) 124432
+(B) 145366
+(C) 157768
+(D) 178432
+(E) 220030
+Answer and stream of consciousness: (E)
+Stream of consciousness: (555 + 445) * 2 * 110 + 30 = 220000 + 30 = 220030
+
+
+The game of blackjack is played with a deck consisting of 13 cards (one of each of the numbers 2-10, one jack, one queen, one king, and one of ace) in each of four suits: clubs, diamonds, hearts, and spades.
+In a game of blackjack, if your first card is a spade, what are the odds that it is an ace?
+Options:
+(A) 1/52
+(B) 1/26
+(C) 1/13
+(D) 1/4
+(E) 5/13
+Answer and stream of consciousness: (C)
+Stream of consciousness: There are 13 spades, the probability that the spade we already have is an ace is therefore 1/13.
+
+
+Jade has 4 flavors of ice cream in his parlor. How many options are there for James to pick a one-flavor, two-flavor, three-flavor or four-flavor order?
+Options:
+(A) 15
+(B) 13
+(C) 14
+(D) 17
+(E) 18
+Answer and stream of consciousness:<|im_end|>
+
+```
+
+**3. After Tokenization:**
+=== Evaluation Prompt 2 - Tokenized ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         1 | <|im_start|>
+   1 |         1 | system
+   2 |         1 | Ċ
+   3 |         1 | You
+   4 |         1 | Ġare
+   5 |         1 | Ġa
+   6 |         1 | Ġhelpful
+   7 |         1 | Ġassistant
+   8 |         1 | .
+   9 |         1 | <|im_end|>
+  10 |         1 | Ċ
+  11 |         1 | <|im_start|>
+  12 |         1 | user
+  13 |         1 | Ċ
+  14 |         1 | The
+  15 |         1 | Ġfloor
+  16 |         1 | Ġof
+  17 |         1 | Ġa
+  18 |         1 | Ġrectangular
+  19 |         1 | Ġroom
+  20 |         1 | Ġis
+  21 |         1 | Ġ
+  22 |         1 | 1
+  23 |         1 | 9
+  24 |         1 | Ġm
+  25 |         1 | Ġlong
+  26 |         1 | Ġand
+  27 |         1 | Ġ
+  28 |         1 | 1
+  29 |         1 | 2
+  30 |         1 | Ġm
+  31 |         1 | Ġwide
+  32 |         1 | .
+  33 |         1 | ĠThe
+  34 |         1 | Ġroom
+  35 |         1 | Ġis
+  36 |         1 | Ġsurrounded
+  37 |         1 | Ġby
+  38 |         1 | Ġa
+  39 |         1 | Ġver
+  40 |         1 | anda
+  41 |         1 | Ġof
+  42 |         1 | Ġwidth
+  43 |         1 | Ġ
+  44 |         1 | 2
+  45 |         1 | Ġm
+  46 |         1 | Ġon
+  47 |         1 | Ġall
+  48 |         1 | Ġits
+  49 |         1 | Ġsides
+  50 |         1 | .
+  51 |         1 | ĠThe
+  52 |         1 | Ġarea
+  53 |         1 | Ġof
+  54 |         1 | Ġthe
+  55 |         1 | Ġver
+  56 |         1 | anda
+  57 |         1 | Ġis
+  58 |         1 | Ġ:Ċ
+  59 |         1 | Options
+  60 |         1 | :Ċ
+  61 |         1 | (A
+  62 |         1 | )
+  63 |         1 | Ġ
+  64 |         1 | 1
+  65 |         1 | 4
+  66 |         1 | 4
+  67 |         1 | Ġm
+  68 |         1 | 2
+  69 |         1 | Ċ
+  70 |         1 | (B
+  71 |         1 | )
+  72 |         1 | Ġ
+  73 |         1 | 1
+  74 |         1 | 4
+  75 |         1 | 0
+  76 |         1 | Ġm
+  77 |         1 | 2
+  78 |         1 | Ċ
+  79 |         1 | (C
+  80 |         1 | )
+  81 |         1 | Ġ
+  82 |         1 | 1
+  83 |         1 | 0
+  84 |         1 | 8
+  85 |         1 | Ġm
+  86 |         1 | 2
+  87 |         1 | Ċ
+  88 |         1 | (D
+  89 |         1 | )
+  90 |         1 | Ġ
+  91 |         1 | 1
+  92 |         1 | 5
+  93 |         1 | 8
+  94 |         1 | Ġm
+  95 |         1 | 2
+  96 |         1 | Ċ
+  97 |         1 | (E
+  98 |         1 | )
+  99 |         1 | ĠNone
+ 100 |         1 | Ġof
+ 101 |         1 | Ġthese
+ 102 |         1 | Ċ
+ 103 |         1 | Answer
+ 104 |         1 | Ġand
+ 105 |         1 | Ġstream
+ 106 |         1 | Ġof
+ 107 |         1 | Ġconsciousness
+ 108 |         1 | :
+ 109 |         1 | Ġ(
+ 110 |         1 | B
+ 111 |         1 | )Ċ
+ 112 |         1 | Stream
+ 113 |         1 | Ġof
+ 114 |         1 | Ġconsciousness
+ 115 |         1 | :
+ 116 |         1 | ĠArea
+ 117 |         1 | Ġof
+ 118 |         1 | Ġthe
+ 119 |         1 | Ġouter
+ 120 |         1 | Ġrectangle
+ 121 |         1 | Ġ=
+ 122 |         1 | Ġ
+ 123 |         1 | 2
+ 124 |         1 | 3
+ 125 |         1 | ĠÃĥ
+ 126 |         1 | âĢĶ
+ 127 |         1 | Ġ
+ 128 |         1 | 1
+ 129 |         1 | 6
+ 130 |         1 | Ġ=
+ 131 |         1 | Ġ
+ 132 |         1 | 3
+ 133 |         1 | 6
+ 134 |         1 | 8
+ 135 |         1 | Ġm
+ 136 |         1 | 2
+ 137 |         1 | Ċ
+ 138 |         1 | Area
+ 139 |         1 | Ġof
+ 140 |         1 | Ġthe
+ 141 |         1 | Ġinner
+ 142 |         1 | Ġrectangle
+ 143 |         1 | Ġ=
+ 144 |         1 | Ġ
+ 145 |         1 | 1
+ 146 |         1 | 9
+ 147 |         1 | ĠÃĥ
+ 148 |         1 | âĢĶ
+ 149 |         1 | Ġ
+ 150 |         1 | 1
+ 151 |         1 | 2
+ 152 |         1 | Ġ=
+ 153 |         1 | Ġ
+ 154 |         1 | 2
+ 155 |         1 | 2
+ 156 |         1 | 8
+ 157 |         1 | Ġm
+ 158 |         1 | 2
+ 159 |         1 | Ċ
+ 160 |         1 | Required
+ 161 |         1 | Ġarea
+ 162 |         1 | Ġ=
+ 163 |         1 | Ġ(
+ 164 |         1 | 3
+ 165 |         1 | 6
+ 166 |         1 | 8
+ 167 |         1 | ĠÃ¢
+ 168 |         1 | âĤ¬âĢľ
+ 169 |         1 | Ġ
+ 170 |         1 | 2
+ 171 |         1 | 2
+ 172 |         1 | 8
+ 173 |         1 | )
+ 174 |         1 | Ġ=
+ 175 |         1 | Ġ
+ 176 |         1 | 1
+ 177 |         1 | 4
+ 178 |         1 | 0
+ 179 |         1 | Ġm
+ 180 |         1 | 2
+ 181 |         1 | ĊĊĊ
+ 182 |         1 | A
+ 183 |         1 | Ġno
+ 184 |         1 | .
+ 185 |         1 | Ġwhen
+ 186 |         1 | Ġdivided
+ 187 |         1 | Ġby
+ 188 |         1 | Ġthe
+ 189 |         1 | Ġsum
+ 190 |         1 | Ġof
+ 191 |         1 | Ġ
+ 192 |         1 | 5
+ 193 |         1 | 5
+ 194 |         1 | 5
+ 195 |         1 | Ġand
+ 196 |         1 | Ġ
+ 197 |         1 | 4
+ 198 |         1 | 4
+ 199 |         1 | 5
+ 200 |         1 | Ġgives
+ 201 |         1 | Ġ
+ 202 |         1 | 2
+ 203 |         1 | times
+ 204 |         1 | Ġtheir
+ 205 |         1 | Ġdifference
+ 206 |         1 | Ġas
+ 207 |         1 | Ġquotient
+ 208 |         1 | Ġ&
+ 209 |         1 | Ġ
+ 210 |         1 | 3
+ 211 |         1 | 0
+ 212 |         1 | Ġas
+ 213 |         1 | Ġremainder
+ 214 |         1 | .
+ 215 |         1 | ĠFind
+ 216 |         1 | Ġthe
+ 217 |         1 | Ġno
+ 218 |         1 | .
+ 219 |         1 | Ġis
+ 220 |         1 | ?Ċ
+ 221 |         1 | Options
+ 222 |         1 | :Ċ
+ 223 |         1 | (A
+ 224 |         1 | )
+ 225 |         1 | Ġ
+ 226 |         1 | 1
+ 227 |         1 | 2
+ 228 |         1 | 4
+ 229 |         1 | 4
+ 230 |         1 | 3
+ 231 |         1 | 2
+ 232 |         1 | Ċ
+ 233 |         1 | (B
+ 234 |         1 | )
+ 235 |         1 | Ġ
+ 236 |         1 | 1
+ 237 |         1 | 4
+ 238 |         1 | 5
+ 239 |         1 | 3
+ 240 |         1 | 6
+ 241 |         1 | 6
+ 242 |         1 | Ċ
+ 243 |         1 | (C
+ 244 |         1 | )
+ 245 |         1 | Ġ
+ 246 |         1 | 1
+ 247 |         1 | 5
+ 248 |         1 | 7
+ 249 |         1 | 7
+ 250 |         1 | 6
+ 251 |         1 | 8
+ 252 |         1 | Ċ
+ 253 |         1 | (D
+ 254 |         1 | )
+ 255 |         1 | Ġ
+ 256 |         1 | 1
+ 257 |         1 | 7
+ 258 |         1 | 8
+ 259 |         1 | 4
+ 260 |         1 | 3
+ 261 |         1 | 2
+ 262 |         1 | Ċ
+ 263 |         1 | (E
+ 264 |         1 | )
+ 265 |         1 | Ġ
+ 266 |         1 | 2
+ 267 |         1 | 2
+ 268 |         1 | 0
+ 269 |         1 | 0
+ 270 |         1 | 3
+ 271 |         1 | 0
+ 272 |         1 | Ċ
+ 273 |         1 | Answer
+ 274 |         1 | Ġand
+ 275 |         1 | Ġstream
+ 276 |         1 | Ġof
+ 277 |         1 | Ġconsciousness
+ 278 |         1 | :
+ 279 |         1 | Ġ(
+ 280 |         1 | E
+ 281 |         1 | )Ċ
+ 282 |         1 | Stream
+ 283 |         1 | Ġof
+ 284 |         1 | Ġconsciousness
+ 285 |         1 | :
+ 286 |         1 | Ġ(
+ 287 |         1 | 5
+ 288 |         1 | 5
+ 289 |         1 | 5
+ 290 |         1 | Ġ+
+ 291 |         1 | Ġ
+ 292 |         1 | 4
+ 293 |         1 | 4
+ 294 |         1 | 5
+ 295 |         1 | )
+ 296 |         1 | Ġ*
+ 297 |         1 | Ġ
+ 298 |         1 | 2
+ 299 |         1 | Ġ*
+ 300 |         1 | Ġ
+ 301 |         1 | 1
+ 302 |         1 | 1
+ 303 |         1 | 0
+ 304 |         1 | Ġ+
+ 305 |         1 | Ġ
+ 306 |         1 | 3
+ 307 |         1 | 0
+ 308 |         1 | Ġ=
+ 309 |         1 | Ġ
+ 310 |         1 | 2
+ 311 |         1 | 2
+ 312 |         1 | 0
+ 313 |         1 | 0
+ 314 |         1 | 0
+ 315 |         1 | 0
+ 316 |         1 | Ġ+
+ 317 |         1 | Ġ
+ 318 |         1 | 3
+ 319 |         1 | 0
+ 320 |         1 | Ġ=
+ 321 |         1 | Ġ
+ 322 |         1 | 2
+ 323 |         1 | 2
+ 324 |         1 | 0
+ 325 |         1 | 0
+ 326 |         1 | 3
+ 327 |         1 | 0
+ 328 |         1 | ĊĊĊ
+ 329 |         1 | The
+ 330 |         1 | Ġgame
+ 331 |         1 | Ġof
+ 332 |         1 | Ġblackjack
+ 333 |         1 | Ġis
+ 334 |         1 | Ġplayed
+ 335 |         1 | Ġwith
+ 336 |         1 | Ġa
+ 337 |         1 | Ġdeck
+ 338 |         1 | Ġconsisting
+ 339 |         1 | Ġof
+ 340 |         1 | Ġ
+ 341 |         1 | 1
+ 342 |         1 | 3
+ 343 |         1 | Ġcards
+ 344 |         1 | Ġ(
+ 345 |         1 | one
+ 346 |         1 | Ġof
+ 347 |         1 | Ġeach
+ 348 |         1 | Ġof
+ 349 |         1 | Ġthe
+ 350 |         1 | Ġnumbers
+ 351 |         1 | Ġ
+ 352 |         1 | 2
+ 353 |         1 | -
+ 354 |         1 | 1
+ 355 |         1 | 0
+ 356 |         1 | ,
+ 357 |         1 | Ġone
+ 358 |         1 | Ġjack
+ 359 |         1 | ,
+ 360 |         1 | Ġone
+ 361 |         1 | Ġqueen
+ 362 |         1 | ,
+ 363 |         1 | Ġone
+ 364 |         1 | Ġking
+ 365 |         1 | ,
+ 366 |         1 | Ġand
+ 367 |         1 | Ġone
+ 368 |         1 | Ġof
+ 369 |         1 | Ġace
+ 370 |         1 | )
+ 371 |         1 | Ġin
+ 372 |         1 | Ġeach
+ 373 |         1 | Ġof
+ 374 |         1 | Ġfour
+ 375 |         1 | Ġsuits
+ 376 |         1 | :
+ 377 |         1 | Ġclubs
+ 378 |         1 | ,
+ 379 |         1 | Ġdiamonds
+ 380 |         1 | ,
+ 381 |         1 | Ġhearts
+ 382 |         1 | ,
+ 383 |         1 | Ġand
+ 384 |         1 | Ġsp
+ 385 |         1 | ades
+ 386 |         1 | .Ċ
+ 387 |         1 | In
+ 388 |         1 | Ġa
+ 389 |         1 | Ġgame
+ 390 |         1 | Ġof
+ 391 |         1 | Ġblackjack
+ 392 |         1 | ,
+ 393 |         1 | Ġif
+ 394 |         1 | Ġyour
+ 395 |         1 | Ġfirst
+ 396 |         1 | Ġcard
+ 397 |         1 | Ġis
+ 398 |         1 | Ġa
+ 399 |         1 | Ġsp
+ 400 |         1 | ade
+ 401 |         1 | ,
+ 402 |         1 | Ġwhat
+ 403 |         1 | Ġare
+ 404 |         1 | Ġthe
+ 405 |         1 | Ġodds
+ 406 |         1 | Ġthat
+ 407 |         1 | Ġit
+ 408 |         1 | Ġis
+ 409 |         1 | Ġan
+ 410 |         1 | Ġace
+ 411 |         1 | ?Ċ
+ 412 |         1 | Options
+ 413 |         1 | :Ċ
+ 414 |         1 | (A
+ 415 |         1 | )
+ 416 |         1 | Ġ
+ 417 |         1 | 1
+ 418 |         1 | /
+ 419 |         1 | 5
+ 420 |         1 | 2
+ 421 |         1 | Ċ
+ 422 |         1 | (B
+ 423 |         1 | )
+ 424 |         1 | Ġ
+ 425 |         1 | 1
+ 426 |         1 | /
+ 427 |         1 | 2
+ 428 |         1 | 6
+ 429 |         1 | Ċ
+ 430 |         1 | (C
+ 431 |         1 | )
+ 432 |         1 | Ġ
+ 433 |         1 | 1
+ 434 |         1 | /
+ 435 |         1 | 1
+ 436 |         1 | 3
+ 437 |         1 | Ċ
+ 438 |         1 | (D
+ 439 |         1 | )
+ 440 |         1 | Ġ
+ 441 |         1 | 1
+ 442 |         1 | /
+ 443 |         1 | 4
+ 444 |         1 | Ċ
+ 445 |         1 | (E
+ 446 |         1 | )
+ 447 |         1 | Ġ
+ 448 |         1 | 5
+ 449 |         1 | /
+ 450 |         1 | 1
+ 451 |         1 | 3
+ 452 |         1 | Ċ
+ 453 |         1 | Answer
+ 454 |         1 | Ġand
+ 455 |         1 | Ġstream
+ 456 |         1 | Ġof
+ 457 |         1 | Ġconsciousness
+ 458 |         1 | :
+ 459 |         1 | Ġ(
+ 460 |         1 | C
+ 461 |         1 | )Ċ
+ 462 |         1 | Stream
+ 463 |         1 | Ġof
+ 464 |         1 | Ġconsciousness
+ 465 |         1 | :
+ 466 |         1 | ĠThere
+ 467 |         1 | Ġare
+ 468 |         1 | Ġ
+ 469 |         1 | 1
+ 470 |         1 | 3
+ 471 |         1 | Ġsp
+ 472 |         1 | ades
+ 473 |         1 | ,
+ 474 |         1 | Ġthe
+ 475 |         1 | Ġprobability
+ 476 |         1 | Ġthat
+ 477 |         1 | Ġthe
+ 478 |         1 | Ġsp
+ 479 |         1 | ade
+ 480 |         1 | Ġwe
+ 481 |         1 | Ġalready
+ 482 |         1 | Ġhave
+ 483 |         1 | Ġis
+ 484 |         1 | Ġan
+ 485 |         1 | Ġace
+ 486 |         1 | Ġis
+ 487 |         1 | Ġtherefore
+ 488 |         1 | Ġ
+ 489 |         1 | 1
+ 490 |         1 | /
+ 491 |         1 | 1
+ 492 |         1 | 3
+ 493 |         1 | .ĊĊĊ
+ 494 |         1 | J
+ 495 |         1 | ade
+ 496 |         1 | Ġhas
+ 497 |         1 | Ġ
+ 498 |         1 | 4
+ 499 |         1 | Ġflavors
+ 500 |         1 | Ġof
+ 501 |         1 | Ġice
+ 502 |         1 | Ġcream
+ 503 |         1 | Ġin
+ 504 |         1 | Ġhis
+ 505 |         1 | Ġpar
+ 506 |         1 | lor
+ 507 |         1 | .
+ 508 |         1 | ĠHow
+ 509 |         1 | Ġmany
+ 510 |         1 | Ġoptions
+ 511 |         1 | Ġare
+ 512 |         1 | Ġthere
+ 513 |         1 | Ġfor
+ 514 |         1 | ĠJames
+ 515 |         1 | Ġto
+ 516 |         1 | Ġpick
+ 517 |         1 | Ġa
+ 518 |         1 | Ġone
+ 519 |         1 | -fl
+ 520 |         1 | avor
+ 521 |         1 | ,
+ 522 |         1 | Ġtwo
+ 523 |         1 | -fl
+ 524 |         1 | avor
+ 525 |         1 | ,
+ 526 |         1 | Ġthree
+ 527 |         1 | -fl
+ 528 |         1 | avor
+ 529 |         1 | Ġor
+ 530 |         1 | Ġfour
+ 531 |         1 | -fl
+ 532 |         1 | avor
+ 533 |         1 | Ġorder
+ 534 |         1 | ?Ċ
+ 535 |         1 | Options
+ 536 |         1 | :Ċ
+ 537 |         1 | (A
+ 538 |         1 | )
+ 539 |         1 | Ġ
+ 540 |         1 | 1
+ 541 |         1 | 5
+ 542 |         1 | Ċ
+ 543 |         1 | (B
+ 544 |         1 | )
+ 545 |         1 | Ġ
+ 546 |         1 | 1
+ 547 |         1 | 3
+ 548 |         1 | Ċ
+ 549 |         1 | (C
+ 550 |         1 | )
+ 551 |         1 | Ġ
+ 552 |         1 | 1
+ 553 |         1 | 4
+ 554 |         1 | Ċ
+ 555 |         1 | (D
+ 556 |         1 | )
+ 557 |         1 | Ġ
+ 558 |         1 | 1
+ 559 |         1 | 7
+ 560 |         1 | Ċ
+ 561 |         1 | (E
+ 562 |         1 | )
+ 563 |         1 | Ġ
+ 564 |         1 | 1
+ 565 |         1 | 8
+ 566 |         1 | Ċ
+ 567 |         1 | Answer
+ 568 |         1 | Ġand
+ 569 |         1 | Ġstream
+ 570 |         1 | Ġof
+ 571 |         1 | Ġconsciousness
+ 572 |         1 | :
+ 573 |         1 | <|im_end|>
+ 574 |         1 | Ċ
+
+----------------------------------------------------------------------
+
+#### Evaluation Prompt 3
+**1. Original Prompt:**
+```
+Definition: In this task, you are given an abstract of article. Your task is to generate label "True" if abstract is structured, otherwise generate "False". A structured abstract is composed of a topic sentence (or key sentence), relevant supporting sentences, and a closing (or transition) sentence. This structure is key to keeping your abstract focused on the main idea and creating a clear and concise image.
+Input: Integrins are membrane receptors which mediate cell-cell or cell-matrix adhesion. Integrin alpha IIb beta 3 (glycoprotein IIb-IIIa) acts as a fibrinogen receptor of platelets and mediates platelet aggregation. Platelet activation is required for alpha IIb beta 3 to shift from noncompetent to competent for binding soluble fibrinogen. The steps involved in this transition are poorly understood. We have studied a variant of Glanzmann thrombasthenia, a congenital bleeding disorder characterized by absence of platelet aggregation and fibrinogen binding. The patient's platelets did not bind fibrinogen after platelet activation by ADP or thrombin, though his platelets contained alpha IIb beta 3. However, isolated alpha IIb beta 3 was able to bind to an Arg-Gly-Asp-Ser affinity column, and binding of soluble fibrinogen to the patient's platelets could be triggered by modulators of alpha IIb beta 3 conformation such as the Arg-Gly-Asp-Ser peptide and alpha-chymotrypsin. These data suggested that a functional Arg-Gly-Asp binding site was present within alpha IIb beta 3 and that the patient's defect was not secondary to a blockade of alpha IIb beta 3 in a noncompetent conformational state. This was evocative of a defect in the coupling between platelet activation and alpha IIb beta 3 up-regulation. We therefore sequenced the cytoplasmic domain of beta 3, following polymerase chain reaction (PCR) on platelet RNA, and found a T-->C mutation at nucleotide 2259, corresponding to a Ser-752-->Pro substitution. This mutation is likely to be responsible for the uncoupling of alpha IIb beta 3 from cellular activation because (i) it is not a polymorphism, (ii) it is the only mutation in the entire alpha IIb beta 3 sequence, and (iii) genetic analysis of the family showed that absence of the Pro-752 beta 3 allele was associated with the normal phenotype. Our data thus identify the C-terminal portion of the cytoplasmic domain of beta 3 as an intrinsic element in the coupling between alpha IIb beta 3 and platelet activation.
+Output:
+```
+
+**2. After _format_conversation:**
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+Definition: In this task, you are given an abstract of article. Your task is to generate label "True" if abstract is structured, otherwise generate "False". A structured abstract is composed of a topic sentence (or key sentence), relevant supporting sentences, and a closing (or transition) sentence. This structure is key to keeping your abstract focused on the main idea and creating a clear and concise image.
+Input: Integrins are membrane receptors which mediate cell-cell or cell-matrix adhesion. Integrin alpha IIb beta 3 (glycoprotein IIb-IIIa) acts as a fibrinogen receptor of platelets and mediates platelet aggregation. Platelet activation is required for alpha IIb beta 3 to shift from noncompetent to competent for binding soluble fibrinogen. The steps involved in this transition are poorly understood. We have studied a variant of Glanzmann thrombasthenia, a congenital bleeding disorder characterized by absence of platelet aggregation and fibrinogen binding. The patient's platelets did not bind fibrinogen after platelet activation by ADP or thrombin, though his platelets contained alpha IIb beta 3. However, isolated alpha IIb beta 3 was able to bind to an Arg-Gly-Asp-Ser affinity column, and binding of soluble fibrinogen to the patient's platelets could be triggered by modulators of alpha IIb beta 3 conformation such as the Arg-Gly-Asp-Ser peptide and alpha-chymotrypsin. These data suggested that a functional Arg-Gly-Asp binding site was present within alpha IIb beta 3 and that the patient's defect was not secondary to a blockade of alpha IIb beta 3 in a noncompetent conformational state. This was evocative of a defect in the coupling between platelet activation and alpha IIb beta 3 up-regulation. We therefore sequenced the cytoplasmic domain of beta 3, following polymerase chain reaction (PCR) on platelet RNA, and found a T-->C mutation at nucleotide 2259, corresponding to a Ser-752-->Pro substitution. This mutation is likely to be responsible for the uncoupling of alpha IIb beta 3 from cellular activation because (i) it is not a polymorphism, (ii) it is the only mutation in the entire alpha IIb beta 3 sequence, and (iii) genetic analysis of the family showed that absence of the Pro-752 beta 3 allele was associated with the normal phenotype. Our data thus identify the C-terminal portion of the cytoplasmic domain of beta 3 as an intrinsic element in the coupling between alpha IIb beta 3 and platelet activation.
+Output:<|im_end|>
+
+```
+
+**3. After Tokenization:**
+=== Evaluation Prompt 3 - Tokenized ===
+Token | Attention | Text
+--------------------------------------------------
+   0 |         1 | <|im_start|>
+   1 |         1 | system
+   2 |         1 | Ċ
+   3 |         1 | You
+   4 |         1 | Ġare
+   5 |         1 | Ġa
+   6 |         1 | Ġhelpful
+   7 |         1 | Ġassistant
+   8 |         1 | .
+   9 |         1 | <|im_end|>
+  10 |         1 | Ċ
+  11 |         1 | <|im_start|>
+  12 |         1 | user
+  13 |         1 | Ċ
+  14 |         1 | Definition
+  15 |         1 | :
+  16 |         1 | ĠIn
+  17 |         1 | Ġthis
+  18 |         1 | Ġtask
+  19 |         1 | ,
+  20 |         1 | Ġyou
+  21 |         1 | Ġare
+  22 |         1 | Ġgiven
+  23 |         1 | Ġan
+  24 |         1 | Ġabstract
+  25 |         1 | Ġof
+  26 |         1 | Ġarticle
+  27 |         1 | .
+  28 |         1 | ĠYour
+  29 |         1 | Ġtask
+  30 |         1 | Ġis
+  31 |         1 | Ġto
+  32 |         1 | Ġgenerate
+  33 |         1 | Ġlabel
+  34 |         1 | Ġ"
+  35 |         1 | True
+  36 |         1 | "
+  37 |         1 | Ġif
+  38 |         1 | Ġabstract
+  39 |         1 | Ġis
+  40 |         1 | Ġstructured
+  41 |         1 | ,
+  42 |         1 | Ġotherwise
+  43 |         1 | Ġgenerate
+  44 |         1 | Ġ"
+  45 |         1 | False
+  46 |         1 | ".
+  47 |         1 | ĠA
+  48 |         1 | Ġstructured
+  49 |         1 | Ġabstract
+  50 |         1 | Ġis
+  51 |         1 | Ġcomposed
+  52 |         1 | Ġof
+  53 |         1 | Ġa
+  54 |         1 | Ġtopic
+  55 |         1 | Ġsentence
+  56 |         1 | Ġ(
+  57 |         1 | or
+  58 |         1 | Ġkey
+  59 |         1 | Ġsentence
+  60 |         1 | ),
+  61 |         1 | Ġrelevant
+  62 |         1 | Ġsupporting
+  63 |         1 | Ġsentences
+  64 |         1 | ,
+  65 |         1 | Ġand
+  66 |         1 | Ġa
+  67 |         1 | Ġclosing
+  68 |         1 | Ġ(
+  69 |         1 | or
+  70 |         1 | Ġtransition
+  71 |         1 | )
+  72 |         1 | Ġsentence
+  73 |         1 | .
+  74 |         1 | ĠThis
+  75 |         1 | Ġstructure
+  76 |         1 | Ġis
+  77 |         1 | Ġkey
+  78 |         1 | Ġto
+  79 |         1 | Ġkeeping
+  80 |         1 | Ġyour
+  81 |         1 | Ġabstract
+  82 |         1 | Ġfocused
+  83 |         1 | Ġon
+  84 |         1 | Ġthe
+  85 |         1 | Ġmain
+  86 |         1 | Ġidea
+  87 |         1 | Ġand
+  88 |         1 | Ġcreating
+  89 |         1 | Ġa
+  90 |         1 | Ġclear
+  91 |         1 | Ġand
+  92 |         1 | Ġconcise
+  93 |         1 | Ġimage
+  94 |         1 | .Ċ
+  95 |         1 | Input
+  96 |         1 | :
+  97 |         1 | ĠIntegr
+  98 |         1 | ins
+  99 |         1 | Ġare
+ 100 |         1 | Ġmembrane
+ 101 |         1 | Ġreceptors
+ 102 |         1 | Ġwhich
+ 103 |         1 | Ġmed
+ 104 |         1 | iate
+ 105 |         1 | Ġcell
+ 106 |         1 | -cell
+ 107 |         1 | Ġor
+ 108 |         1 | Ġcell
+ 109 |         1 | -m
+ 110 |         1 | atrix
+ 111 |         1 | Ġad
+ 112 |         1 | hesion
+ 113 |         1 | .
+ 114 |         1 | ĠIntegr
+ 115 |         1 | in
+ 116 |         1 | Ġalpha
+ 117 |         1 | ĠII
+ 118 |         1 | b
+ 119 |         1 | Ġbeta
+ 120 |         1 | Ġ
+ 121 |         1 | 3
+ 122 |         1 | Ġ(
+ 123 |         1 | gly
+ 124 |         1 | cop
+ 125 |         1 | rotein
+ 126 |         1 | ĠII
+ 127 |         1 | b
+ 128 |         1 | -
+ 129 |         1 | III
+ 130 |         1 | a
+ 131 |         1 | )
+ 132 |         1 | Ġacts
+ 133 |         1 | Ġas
+ 134 |         1 | Ġa
+ 135 |         1 | Ġfibr
+ 136 |         1 | in
+ 137 |         1 | ogen
+ 138 |         1 | Ġreceptor
+ 139 |         1 | Ġof
+ 140 |         1 | Ġplate
+ 141 |         1 | lets
+ 142 |         1 | Ġand
+ 143 |         1 | Ġmedi
+ 144 |         1 | ates
+ 145 |         1 | Ġplate
+ 146 |         1 | let
+ 147 |         1 | Ġaggregation
+ 148 |         1 | .
+ 149 |         1 | ĠPlate
+ 150 |         1 | let
+ 151 |         1 | Ġactivation
+ 152 |         1 | Ġis
+ 153 |         1 | Ġrequired
+ 154 |         1 | Ġfor
+ 155 |         1 | Ġalpha
+ 156 |         1 | ĠII
+ 157 |         1 | b
+ 158 |         1 | Ġbeta
+ 159 |         1 | Ġ
+ 160 |         1 | 3
+ 161 |         1 | Ġto
+ 162 |         1 | Ġshift
+ 163 |         1 | Ġfrom
+ 164 |         1 | Ġnon
+ 165 |         1 | compet
+ 166 |         1 | ent
+ 167 |         1 | Ġto
+ 168 |         1 | Ġcompetent
+ 169 |         1 | Ġfor
+ 170 |         1 | Ġbinding
+ 171 |         1 | Ġsoluble
+ 172 |         1 | Ġfibr
+ 173 |         1 | in
+ 174 |         1 | ogen
+ 175 |         1 | .
+ 176 |         1 | ĠThe
+ 177 |         1 | Ġsteps
+ 178 |         1 | Ġinvolved
+ 179 |         1 | Ġin
+ 180 |         1 | Ġthis
+ 181 |         1 | Ġtransition
+ 182 |         1 | Ġare
+ 183 |         1 | Ġpoorly
+ 184 |         1 | Ġunderstood
+ 185 |         1 | .
+ 186 |         1 | ĠWe
+ 187 |         1 | Ġhave
+ 188 |         1 | Ġstudied
+ 189 |         1 | Ġa
+ 190 |         1 | Ġvariant
+ 191 |         1 | Ġof
+ 192 |         1 | ĠGl
+ 193 |         1 | anz
+ 194 |         1 | mann
+ 195 |         1 | Ġthrom
+ 196 |         1 | bast
+ 197 |         1 | hen
+ 198 |         1 | ia
+ 199 |         1 | ,
+ 200 |         1 | Ġa
+ 201 |         1 | Ġcongen
+ 202 |         1 | ital
+ 203 |         1 | Ġbleeding
+ 204 |         1 | Ġdisorder
+ 205 |         1 | Ġcharacterized
+ 206 |         1 | Ġby
+ 207 |         1 | Ġabsence
+ 208 |         1 | Ġof
+ 209 |         1 | Ġplate
+ 210 |         1 | let
+ 211 |         1 | Ġaggregation
+ 212 |         1 | Ġand
+ 213 |         1 | Ġfibr
+ 214 |         1 | in
+ 215 |         1 | ogen
+ 216 |         1 | Ġbinding
+ 217 |         1 | .
+ 218 |         1 | ĠThe
+ 219 |         1 | Ġpatient
+ 220 |         1 | 's
+ 221 |         1 | Ġplate
+ 222 |         1 | lets
+ 223 |         1 | Ġdid
+ 224 |         1 | Ġnot
+ 225 |         1 | Ġbind
+ 226 |         1 | Ġfibr
+ 227 |         1 | in
+ 228 |         1 | ogen
+ 229 |         1 | Ġafter
+ 230 |         1 | Ġplate
+ 231 |         1 | let
+ 232 |         1 | Ġactivation
+ 233 |         1 | Ġby
+ 234 |         1 | ĠAD
+ 235 |         1 | P
+ 236 |         1 | Ġor
+ 237 |         1 | Ġthrom
+ 238 |         1 | bin
+ 239 |         1 | ,
+ 240 |         1 | Ġthough
+ 241 |         1 | Ġhis
+ 242 |         1 | Ġplate
+ 243 |         1 | lets
+ 244 |         1 | Ġcontained
+ 245 |         1 | Ġalpha
+ 246 |         1 | ĠII
+ 247 |         1 | b
+ 248 |         1 | Ġbeta
+ 249 |         1 | Ġ
+ 250 |         1 | 3
+ 251 |         1 | .
+ 252 |         1 | ĠHowever
+ 253 |         1 | ,
+ 254 |         1 | Ġisolated
+ 255 |         1 | Ġalpha
+ 256 |         1 | ĠII
+ 257 |         1 | b
+ 258 |         1 | Ġbeta
+ 259 |         1 | Ġ
+ 260 |         1 | 3
+ 261 |         1 | Ġwas
+ 262 |         1 | Ġable
+ 263 |         1 | Ġto
+ 264 |         1 | Ġbind
+ 265 |         1 | Ġto
+ 266 |         1 | Ġan
+ 267 |         1 | ĠArg
+ 268 |         1 | -G
+ 269 |         1 | ly
+ 270 |         1 | -
+ 271 |         1 | As
+ 272 |         1 | p
+ 273 |         1 | -S
+ 274 |         1 | er
+ 275 |         1 | Ġaffinity
+ 276 |         1 | Ġcolumn
+ 277 |         1 | ,
+ 278 |         1 | Ġand
+ 279 |         1 | Ġbinding
+ 280 |         1 | Ġof
+ 281 |         1 | Ġsoluble
+ 282 |         1 | Ġfibr
+ 283 |         1 | in
+ 284 |         1 | ogen
+ 285 |         1 | Ġto
+ 286 |         1 | Ġthe
+ 287 |         1 | Ġpatient
+ 288 |         1 | 's
+ 289 |         1 | Ġplate
+ 290 |         1 | lets
+ 291 |         1 | Ġcould
+ 292 |         1 | Ġbe
+ 293 |         1 | Ġtriggered
+ 294 |         1 | Ġby
+ 295 |         1 | Ġmod
+ 296 |         1 | ulators
+ 297 |         1 | Ġof
+ 298 |         1 | Ġalpha
+ 299 |         1 | ĠII
+ 300 |         1 | b
+ 301 |         1 | Ġbeta
+ 302 |         1 | Ġ
+ 303 |         1 | 3
+ 304 |         1 | Ġcon
+ 305 |         1 | formation
+ 306 |         1 | Ġsuch
+ 307 |         1 | Ġas
+ 308 |         1 | Ġthe
+ 309 |         1 | ĠArg
+ 310 |         1 | -G
+ 311 |         1 | ly
+ 312 |         1 | -
+ 313 |         1 | As
+ 314 |         1 | p
+ 315 |         1 | -S
+ 316 |         1 | er
+ 317 |         1 | Ġpeptide
+ 318 |         1 | Ġand
+ 319 |         1 | Ġalpha
+ 320 |         1 | -ch
+ 321 |         1 | ym
+ 322 |         1 | ot
+ 323 |         1 | ry
+ 324 |         1 | ps
+ 325 |         1 | in
+ 326 |         1 | .
+ 327 |         1 | ĠThese
+ 328 |         1 | Ġdata
+ 329 |         1 | Ġsuggested
+ 330 |         1 | Ġthat
+ 331 |         1 | Ġa
+ 332 |         1 | Ġfunctional
+ 333 |         1 | ĠArg
+ 334 |         1 | -G
+ 335 |         1 | ly
+ 336 |         1 | -
+ 337 |         1 | As
+ 338 |         1 | p
+ 339 |         1 | Ġbinding
+ 340 |         1 | Ġsite
+ 341 |         1 | Ġwas
+ 342 |         1 | Ġpresent
+ 343 |         1 | Ġwithin
+ 344 |         1 | Ġalpha
+ 345 |         1 | ĠII
+ 346 |         1 | b
+ 347 |         1 | Ġbeta
+ 348 |         1 | Ġ
+ 349 |         1 | 3
+ 350 |         1 | Ġand
+ 351 |         1 | Ġthat
+ 352 |         1 | Ġthe
+ 353 |         1 | Ġpatient
+ 354 |         1 | 's
+ 355 |         1 | Ġdefect
+ 356 |         1 | Ġwas
+ 357 |         1 | Ġnot
+ 358 |         1 | Ġsecondary
+ 359 |         1 | Ġto
+ 360 |         1 | Ġa
+ 361 |         1 | Ġblockade
+ 362 |         1 | Ġof
+ 363 |         1 | Ġalpha
+ 364 |         1 | ĠII
+ 365 |         1 | b
+ 366 |         1 | Ġbeta
+ 367 |         1 | Ġ
+ 368 |         1 | 3
+ 369 |         1 | Ġin
+ 370 |         1 | Ġa
+ 371 |         1 | Ġnon
+ 372 |         1 | compet
+ 373 |         1 | ent
+ 374 |         1 | Ġcon
+ 375 |         1 | formation
+ 376 |         1 | al
+ 377 |         1 | Ġstate
+ 378 |         1 | .
+ 379 |         1 | ĠThis
+ 380 |         1 | Ġwas
+ 381 |         1 | Ġev
+ 382 |         1 | oc
+ 383 |         1 | ative
+ 384 |         1 | Ġof
+ 385 |         1 | Ġa
+ 386 |         1 | Ġdefect
+ 387 |         1 | Ġin
+ 388 |         1 | Ġthe
+ 389 |         1 | Ġcoupling
+ 390 |         1 | Ġbetween
+ 391 |         1 | Ġplate
+ 392 |         1 | let
+ 393 |         1 | Ġactivation
+ 394 |         1 | Ġand
+ 395 |         1 | Ġalpha
+ 396 |         1 | ĠII
+ 397 |         1 | b
+ 398 |         1 | Ġbeta
+ 399 |         1 | Ġ
+ 400 |         1 | 3
+ 401 |         1 | Ġup
+ 402 |         1 | -reg
+ 403 |         1 | ulation
+ 404 |         1 | .
+ 405 |         1 | ĠWe
+ 406 |         1 | Ġtherefore
+ 407 |         1 | Ġsequ
+ 408 |         1 | enced
+ 409 |         1 | Ġthe
+ 410 |         1 | Ġcy
+ 411 |         1 | topl
+ 412 |         1 | asm
+ 413 |         1 | ic
+ 414 |         1 | Ġdomain
+ 415 |         1 | Ġof
+ 416 |         1 | Ġbeta
+ 417 |         1 | Ġ
+ 418 |         1 | 3
+ 419 |         1 | ,
+ 420 |         1 | Ġfollowing
+ 421 |         1 | Ġpolymer
+ 422 |         1 | ase
+ 423 |         1 | Ġchain
+ 424 |         1 | Ġreaction
+ 425 |         1 | Ġ(
+ 426 |         1 | PCR
+ 427 |         1 | )
+ 428 |         1 | Ġon
+ 429 |         1 | Ġplate
+ 430 |         1 | let
+ 431 |         1 | ĠRNA
+ 432 |         1 | ,
+ 433 |         1 | Ġand
+ 434 |         1 | Ġfound
+ 435 |         1 | Ġa
+ 436 |         1 | ĠT
+ 437 |         1 | -->
+ 438 |         1 | C
+ 439 |         1 | Ġmutation
+ 440 |         1 | Ġat
+ 441 |         1 | Ġnucle
+ 442 |         1 | otide
+ 443 |         1 | Ġ
+ 444 |         1 | 2
+ 445 |         1 | 2
+ 446 |         1 | 5
+ 447 |         1 | 9
+ 448 |         1 | ,
+ 449 |         1 | Ġcorresponding
+ 450 |         1 | Ġto
+ 451 |         1 | Ġa
+ 452 |         1 | ĠSer
+ 453 |         1 | -
+ 454 |         1 | 7
+ 455 |         1 | 5
+ 456 |         1 | 2
+ 457 |         1 | -->
+ 458 |         1 | Pro
+ 459 |         1 | Ġsubstitution
+ 460 |         1 | .
+ 461 |         1 | ĠThis
+ 462 |         1 | Ġmutation
+ 463 |         1 | Ġis
+ 464 |         1 | Ġlikely
+ 465 |         1 | Ġto
+ 466 |         1 | Ġbe
+ 467 |         1 | Ġresponsible
+ 468 |         1 | Ġfor
+ 469 |         1 | Ġthe
+ 470 |         1 | Ġunc
+ 471 |         1 | ou
+ 472 |         1 | pling
+ 473 |         1 | Ġof
+ 474 |         1 | Ġalpha
+ 475 |         1 | ĠII
+ 476 |         1 | b
+ 477 |         1 | Ġbeta
+ 478 |         1 | Ġ
+ 479 |         1 | 3
+ 480 |         1 | Ġfrom
+ 481 |         1 | Ġcellular
+ 482 |         1 | Ġactivation
+ 483 |         1 | Ġbecause
+ 484 |         1 | Ġ(
+ 485 |         1 | i
+ 486 |         1 | )
+ 487 |         1 | Ġit
+ 488 |         1 | Ġis
+ 489 |         1 | Ġnot
+ 490 |         1 | Ġa
+ 491 |         1 | Ġpolym
+ 492 |         1 | orphism
+ 493 |         1 | ,
+ 494 |         1 | Ġ(
+ 495 |         1 | ii
+ 496 |         1 | )
+ 497 |         1 | Ġit
+ 498 |         1 | Ġis
+ 499 |         1 | Ġthe
+ 500 |         1 | Ġonly
+ 501 |         1 | Ġmutation
+ 502 |         1 | Ġin
+ 503 |         1 | Ġthe
+ 504 |         1 | Ġentire
+ 505 |         1 | Ġalpha
+ 506 |         1 | ĠII
+ 507 |         1 | b
+ 508 |         1 | Ġbeta
+ 509 |         1 | Ġ
+ 510 |         1 | 3
+ 511 |         1 | Ġsequence
+ 512 |         1 | ,
+ 513 |         1 | Ġand
+ 514 |         1 | Ġ(
+ 515 |         1 | iii
+ 516 |         1 | )
+ 517 |         1 | Ġgenetic
+ 518 |         1 | Ġanalysis
+ 519 |         1 | Ġof
+ 520 |         1 | Ġthe
+ 521 |         1 | Ġfamily
+ 522 |         1 | Ġshowed
+ 523 |         1 | Ġthat
+ 524 |         1 | Ġabsence
+ 525 |         1 | Ġof
+ 526 |         1 | Ġthe
+ 527 |         1 | ĠPro
+ 528 |         1 | -
+ 529 |         1 | 7
+ 530 |         1 | 5
+ 531 |         1 | 2
+ 532 |         1 | Ġbeta
+ 533 |         1 | Ġ
+ 534 |         1 | 3
+ 535 |         1 | Ġallele
+ 536 |         1 | Ġwas
+ 537 |         1 | Ġassociated
+ 538 |         1 | Ġwith
+ 539 |         1 | Ġthe
+ 540 |         1 | Ġnormal
+ 541 |         1 | Ġphenotype
+ 542 |         1 | .
+ 543 |         1 | ĠOur
+ 544 |         1 | Ġdata
+ 545 |         1 | Ġthus
+ 546 |         1 | Ġidentify
+ 547 |         1 | Ġthe
+ 548 |         1 | ĠC
+ 549 |         1 | -terminal
+ 550 |         1 | Ġportion
+ 551 |         1 | Ġof
+ 552 |         1 | Ġthe
+ 553 |         1 | Ġcy
+ 554 |         1 | topl
+ 555 |         1 | asm
+ 556 |         1 | ic
+ 557 |         1 | Ġdomain
+ 558 |         1 | Ġof
+ 559 |         1 | Ġbeta
+ 560 |         1 | Ġ
+ 561 |         1 | 3
+ 562 |         1 | Ġas
+ 563 |         1 | Ġan
+ 564 |         1 | Ġintrinsic
+ 565 |         1 | Ġelement
+ 566 |         1 | Ġin
+ 567 |         1 | Ġthe
+ 568 |         1 | Ġcoupling
+ 569 |         1 | Ġbetween
+ 570 |         1 | Ġalpha
+ 571 |         1 | ĠII
+ 572 |         1 | b
+ 573 |         1 | Ġbeta
+ 574 |         1 | Ġ
+ 575 |         1 | 3
+ 576 |         1 | Ġand
+ 577 |         1 | Ġplate
+ 578 |         1 | let
+ 579 |         1 | Ġactivation
+ 580 |         1 | .Ċ
+ 581 |         1 | Output
+ 582 |         1 | :
+ 583 |         1 | <|im_end|>
+ 584 |         1 | Ċ
+
+----------------------------------------------------------------------
+
+### 2.2 Generation and Reward Calculation
+
+#### Processing Evaluation Prompt 1
+**1. Original Prompt:**
+```
+In this task, you are given a second sentence. Your task is to generate the first sentence on the same topic but incoherent and inconsistent with the second sentence.
+
+Q: Additionally , some groups may contain other specialists , such as a heavy weapons or language expert .
+
+A: Each squad member is specially trained as a weapons expert , medic , combat engineer or communications expert , respectively .
+****
+Q: However , the General Accounting Office identified 125 countries that received U.S. training and assistance for their police forces during fiscal year 1990 at a cost of at least $117 million .
+
+A: No government agency is in charge of calculating the cost .
+****
+Q: But his frozen body was found in the ice in Charlotte ( Rochester ) early the next spring by Silas Hudson .
+
+A:
+```
+
+**2. Formatted Prompt:**
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+In this task, you are given a second sentence. Your task is to generate the first sentence on the same topic but incoherent and inconsistent with the second sentence.
+
+Q: Additionally , some groups may contain other specialists , such as a heavy weapons or language expert .
+
+A: Each squad member is specially trained as a weapons expert , medic , combat engineer or communications expert , respectively .
+****
+Q: However , the General Accounting Office identified 125 countries that received U.S. training and assistance for their police forces during fiscal year 1990 at a cost of at least $117 million .
+
+A: No government agency is in charge of calculating the cost .
+****
+Q: But his frozen body was found in the ice in Charlotte ( Rochester ) early the next spring by Silas Hudson .
+
+A:<|im_end|>
+
+```
+
+**3. Generated Response:**
+```
+enter of a protest against the use of drugs
+```
+
+**4. Full Generated Text (with special tokens):**
+```
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+In this task, you are given a second sentence. Your task is to generate the first sentence on the same topic but incoherent and inconsistent with the second sentence.
+
+Q: Additionally , some groups may contain other specialists , such as a heavy weapons or language expert .
+
+A: Each squad member is specially trained as a weapons expert , medic , combat engineer or communications expert , respectively .
+****
+Q: However , the General Accounting Office identified 125 countries that received U.S. training and assistance for their police forces during fiscal year 1990 at a cost of at least $117 million .
+
+A: No government agency is in charge of calculating the cost .
+****
+Q: But his frozen body was found in the ice in Charlotte ( Rochester ) early the next spring by Silas Hudson .
+
+A:<|im_end|>
+****
+Q: A group of young people are at the center of a protest against the use of drugs
+```
+
+**5. Reward Calculation Process:**
+In the actual evaluation, the following steps would be performed:
+
+1. The model response would be extracted from the full generated text
+2. The prompt and response would be formatted for the reward model API:
+   ```json
+   {
+     "messages": [
+       {"role": "user", "content": "In this task, you are given a second sentence. Your task is to generate the first sentence on the same topic but incoherent and inconsistent with the second sentence.
+
+Q: Additionally , some groups may contain other specialists , such as a heavy weapons or language expert .
+
+A: Each squad member is specially trained as a weapons expert , medic , combat engineer or communications expert , respectively .
+****
+Q: However , the General Accounting Office identified 125 countries that received U.S. training and assistance for their police forces during fiscal year 1990 at a cost of at least $117 million .
+
+A: No government agency is in charge of calculating the cost .
+****
+Q: But his frozen body was found in the ice in Charlotte ( Rochester ) early the next spring by Silas Hudson .
+
+A:"},
+       {"role": "assistant", "content": "enter of a protest against the use of drugs"}
+     ]
+   }
+   ```
+
+3. The Nemotron reward model would calculate a reward score
+4. The same process would be repeated for the reference model
+5. The two reward scores would be compared to determine a 'win'
+
+## 3. PIPELINE SUMMARY
+
+### Training Pipeline:
+1. Raw dataset → Format conversations → Tokenize → Set attention masks
+2. For SFT: Forward pass with input_ids, attention_mask, and labels
+3. For DPO: Process both chosen and rejected examples, compare reward scores
+
+### Evaluation Pipeline:
+1. Raw prompts → Format prompt → Tokenize → Generate response
+2. Extract response → Format for reward model → Calculate reward
+3. Compare against reference model → Calculate win rate and metrics
+
+### Key Points:
+- Attention masks are critical for proper loss calculation during training
+- Proper formatting ensures consistent token boundaries between prompt and response
+- The evaluation process mimics real-world usage while providing quantitative metrics

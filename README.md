@@ -1,6 +1,6 @@
 # RL-LLM Training Pipeline
 
-This repository contains a training pipeline for fine-tuning language models using SFT (Supervised Fine-Tuning), DPO (Direct Preference Optimization), and RLOO (REINFORCE Leave One-Out) methods, with integrated Weights & Biands tracking and Nemotron reward model evaluation.
+This repository contains a training pipeline for fine-tuning language models using SFT (Supervised Fine-Tuning), DPO (Direct Preference Optimization), and RLOO (Reinforcement Learning from Human Feedback with Offline Updates) methods, with integrated Weights & Biands tracking and Nemotron reward model evaluation.
 
 ## Setup
 
@@ -30,10 +30,12 @@ You can run the entire training and evaluation pipeline with a single script:
 
 This script will:
 1. Run SFT training on the SmolTalk dataset
-2. Run DPO training (using the SFT model) on the UltraFeedback dataset
-3. Run RLOO training on the UltraFeedback dataset
-4. Evaluate all three models using the Nemotron 70B reward model
+2. Run DPO training (using the SFT model) on the UltraFeedback dataset with 100 examples subset
+3. Run DPO training with 500 examples subset
+4. Evaluate all models using the Nemotron reward model
 5. Log all results to Weights & Biands
+
+The RLOO training section is currently commented out in the script.
 
 The full pipeline will run in sequence and can take several hours to complete. Consider using tmux to run it in the background:
 
@@ -45,7 +47,7 @@ tmux attach-session -t rl_llm_training  # To monitor progress
 ## Memory Management
 
 The pipeline includes automatic GPU memory management:
-- GPU memory is cleared between training phases
+- GPU memory is cleared between training phases using explicit PyTorch commands
 - Memory is also cleared between batches and epochs
 - Each training function uses a try/except/finally pattern to ensure proper cleanup
 
@@ -69,27 +71,39 @@ For SmolTalk dataset, the pipeline automatically calculates an optimal max_lengt
 ### DPO Training
 ```bash
 python train.py --method dpo \
+    --model_name "Qwen/Qwen2.5-0.5B" \
     --sft_model_path "outputs/sft/final" \
     --dataset_name "ultrafeedback" \
-    --batch_size 8 \
-    --learning_rate 1e-5 \
-    --num_epochs 3 \
-    --max_length 512 \
+    --batch_size 2 \
+    --learning_rate 2e-6 \
+    --num_epochs 1 \
+    --max_length 1024 \
     --output_dir "outputs/dpo" \
-    --use_wandb
+    --use_wandb \
+    --gradient_accumulation_steps 16 \
+    --subset_size 100 \
+    --max_steps 500 \
+    --prompt_max_length_ratio 0.7
 ```
+
+The `prompt_max_length_ratio` parameter controls filtering of examples with too long prompts, helping to optimize memory usage.
 
 ### RLOO Training
 ```bash
 python train.py --method rloo \
     --model_name "Qwen/Qwen2.5-0.5B" \
+    --sft_model_path "outputs/sft/final" \
     --dataset_name "ultrafeedback" \
-    --batch_size 8 \
-    --learning_rate 1e-5 \
-    --num_epochs 3 \
-    --max_length 512 \
+    --batch_size 2 \
+    --learning_rate 1e-6 \
+    --num_epochs 1 \
+    --max_length 1024 \
     --output_dir "outputs/rloo" \
-    --use_wandb
+    --use_wandb \
+    --gradient_accumulation_steps 16 \
+    --subset_size 100 \
+    --max_steps 500 \
+    --prompt_max_length_ratio 0.7
 ```
 
 ## Evaluation
@@ -100,23 +114,15 @@ To evaluate a trained model:
 ```bash
 python evaluate.py \
     --model_path "outputs/dpo/final" \
-    --nemotron_api_key "your_api_key" \
     --num_prompts 100 \
     --output_dir "outputs/dpo/eval" \
-    --use_wandb
+    --use_wandb \
+    --detailed_logging
 ```
+
+The `detailed_logging` flag enables comprehensive prompt-wise result tracking in Weights & Biands.
 
 The pipeline uses the "test_prefs" split of the UltraFeedback dataset for evaluation, ensuring proper separation between training and testing data.
-
-## Testing Pipeline
-
-For quick testing or debugging, you can use the test pipeline:
-
-```bash
-./run_test.sh
-```
-
-This script runs a smaller version of the complete pipeline with limited data for faster testing.
 
 ## Weights & Biands Integration
 
@@ -124,11 +130,12 @@ All training and evaluation runs are tracked with Weights & Biands. The integrat
 
 - Training hyperparameters tracking
 - Loss curves for each training method
-- Evaluation metrics comparison
+- Evaluation metrics comparison with histograms
+- Detailed prompt-response tables when using detailed logging
 - Model checkpoints
 - Run naming for easy identification
 
-To view your runs, visit: https://wandb.ai/[your-username]/cs224r_deeprl_final
+To view your runs, visit: https://wandb.ai/zhao111han-stanford-university/cs224r_deeprl_final
 
 ## Datasets
 

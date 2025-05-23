@@ -45,15 +45,15 @@ python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/d
 
 
 
-# DPO with 1000 examples
-echo "Training DPO model with 1000 examples subset..."
-python train.py --method dpo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 2 --learning_rate 2e-6 --num_epochs 1 --max_length 1024 --output_dir "outputs/dpo_1000" --sft_model_path "outputs/sft/final" --use_wandb --gradient_accumulation_steps 16 --subset_size 1000 --max_steps 2000
+# DPO with 500 examples
+echo "Training DPO model with 500 examples subset..."
+python train.py --method dpo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 2 --learning_rate 2e-6 --num_epochs 1 --max_length 1024 --output_dir "outputs/dpo_500" --sft_model_path "outputs/sft/final" --use_wandb --gradient_accumulation_steps 16 --subset_size 500 --max_steps 1000
 
-echo "Evaluating DPO model with 1000 examples..."
-python evaluate.py --model_path "outputs/dpo_1000/final" --num_prompts 100 --output_dir "outputs/dpo_1000/eval" --use_wandb
+echo "Evaluating DPO model with 500 examples..."
+python evaluate.py --model_path "outputs/dpo_500/final" --num_prompts 100 --output_dir "outputs/dpo_500/eval" --use_wandb
 
 # Clear GPU memory after DPO
-echo "Clearing GPU memory after DPO 1000 examples training..."
+echo "Clearing GPU memory after DPO 500 examples training..."
 python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/dev/null || true
 
 
@@ -66,29 +66,29 @@ python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/d
 # python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/dev/null || true
 
 # RLOO with 100 examples
-echo "Training RLOO model with 100 examples subset..."
-python train.py --method rloo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 2 --learning_rate 1e-6 --num_epochs 1 --max_length 1024 --output_dir "outputs/rloo_100" --sft_model_path "outputs/sft/final" --use_wandb --gradient_accumulation_steps 16 --subset_size 100 --max_steps 500
+# echo "Training RLOO model with 100 examples subset..."
+# python train.py --method rloo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 2 --learning_rate 1e-6 --num_epochs 1 --max_length 1024 --output_dir "outputs/rloo_100" --sft_model_path "outputs/sft/final" --use_wandb --gradient_accumulation_steps 16 --subset_size 100 --max_steps 500
 
-echo "Evaluating RLOO model with 100 examples..."
-python evaluate.py --model_path "outputs/rloo_100/final" --num_prompts 100 --output_dir "outputs/rloo_100/eval" --use_wandb
+# echo "Evaluating RLOO model with 100 examples..."
+# python evaluate.py --model_path "outputs/rloo_100/final" --num_prompts 100 --output_dir "outputs/rloo_100/eval" --use_wandb
 
 # Clear GPU memory after RLOO 100
-echo "Clearing GPU memory after RLOO 100 examples training..."
-python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/dev/null || true
+# echo "Clearing GPU memory after RLOO 100 examples training..."
+# python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/dev/null || true
 
 
 
 
 # RLOO with 1000 examples
-echo "Training RLOO model with 1000 examples subset..."
-python train.py --method rloo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 2 --learning_rate 1e-6 --num_epochs 1 --max_length 1024 --output_dir "outputs/rloo_1000" --sft_model_path "outputs/sft/final" --use_wandb --gradient_accumulation_steps 16 --subset_size 1000 --max_steps 2000
+# echo "Training RLOO model with 1000 examples subset..."
+# python train.py --method rloo --model_name "Qwen/Qwen2.5-0.5B" --batch_size 2 --learning_rate 1e-6 --num_epochs 1 --max_length 1024 --output_dir "outputs/rloo_1000" --sft_model_path "outputs/sft/final" --use_wandb --gradient_accumulation_steps 16 --subset_size 1000 --max_steps 2000
 
-echo "Evaluating RLOO model with 1000 examples..."
-python evaluate.py --model_path "outputs/rloo_1000/final" --num_prompts 100 --output_dir "outputs/rloo_1000/eval" --use_wandb
+# echo "Evaluating RLOO model with 1000 examples..."
+# python evaluate.py --model_path "outputs/rloo_1000/final" --num_prompts 100 --output_dir "outputs/rloo_1000/eval" --use_wandb
 
 # Clear GPU memory after RLOO 1000
-echo "Clearing GPU memory after RLOO 1000 examples training..."
-python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/dev/null || true
+# echo "Clearing GPU memory after RLOO 1000 examples training..."
+# python -c "import torch; import gc; torch.cuda.empty_cache(); gc.collect()" 2>/dev/null || true
 
 
 echo "All done!" 
